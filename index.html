@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team Roulette</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'tg-bg': 'var(--tg-theme-bg-color, #18222d)',
+            'tg-text': 'var(--tg-theme-text-color, #ffffff)',
+            'tg-hint': 'var(--tg-theme-hint-color, #b0b3b8)',
+            'tg-link': 'var(--tg-theme-link-color, #62bcf9)',
+            'tg-button': 'var(--tg-theme-button-color, #3390ec)',
+            'tg-button-text': 'var(--tg-theme-button-text-color, #ffffff)',
+            'tg-secondary-bg': 'var(--tg-theme-secondary-bg-color, #222e3a)',
+          },
+          animation: {
+            'spin-slow': 'spin 3s linear infinite',
+            'fade-in': 'fadeIn 0.5s ease-in-out',
+            'slide-in-up': 'slideInUp 0.5s ease-out',
+            'confetti-fall': 'confetti-fall 5s linear infinite',
+          },
+          keyframes: {
+            fadeIn: {
+              '0%': { opacity: 0 },
+              '100%': { opacity: 1 },
+            },
+            slideInUp: {
+              '0%': { transform: 'translateY(20px)', opacity: 0 },
+              '100%': { transform: 'translateY(0)', opacity: 1 },
+            },
+          }
+        }
+      }
+    }
+  </script>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-tg-bg text-tg-text">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
