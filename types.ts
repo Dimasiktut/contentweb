@@ -56,6 +56,7 @@ export enum AppView {
   HISTORY = 'HISTORY',
   REWARDS = 'REWARDS',
   DUEL = 'DUEL',
+  DUEL_HISTORY = 'DUEL_HISTORY',
 }
 
 // Награды в магазине
@@ -82,6 +83,7 @@ export enum DuelStatus {
   OPPONENT_CHOSE = 'opponent_chose',
   COMPLETED = 'completed',
   DECLINED = 'declined',
+  CANCELLED = 'cancelled',
   EXPIRED = 'expired',
 }
 
