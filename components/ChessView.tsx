@@ -108,10 +108,9 @@ const PlayerCard: React.FC<{ user: User; isTurn: boolean }> = ({ user, isTurn })
 const ChessView: React.FC<{
   currentUser: User;
   game: ChessGame;
-  users: User[];
   onMove: (move: { from: string, to: string, promotion?: string }) => void;
   onClose: () => void;
-}> = ({ currentUser, game, users, onMove, onClose }) => {
+}> = ({ currentUser, game, onMove, onClose }) => {
   const [isEngineReady, setIsEngineReady] = useState(typeof window.Chess !== 'undefined');
 
   useEffect(() => {
@@ -143,9 +142,8 @@ const ChessView: React.FC<{
   }, [game.fen, isEngineReady]);
 
   const opponent = useMemo(() => {
-    const opponentId = game.player_white === currentUser.id ? game.player_black : game.player_white;
-    return users.find(u => u.id === opponentId);
-  }, [game, currentUser, users]);
+    return game.player_white === currentUser.id ? game.expand?.player_black : game.expand?.player_white;
+  }, [game, currentUser]);
   
   const playerColor = game.player_white === currentUser.id ? 'w' : 'b';
   const isMyTurn = chess ? chess.turn() === playerColor : false;

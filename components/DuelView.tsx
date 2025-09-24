@@ -10,15 +10,14 @@ const CHOICES: Record<DuelChoice, { name: string; icon: string; beats: DuelChoic
 interface DuelViewProps {
   currentUser: User;
   duel: Duel;
-  users: User[];
   onMakeChoice: (choice: DuelChoice) => void;
   onClose: () => void;
   onCancel: () => void;
 }
 
-const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeChoice, onClose, onCancel }) => {
+const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, onMakeChoice, onClose, onCancel }) => {
   const isChallenger = duel.challenger === currentUser.id;
-  const opponentUser = users.find(u => u.id === (isChallenger ? duel.opponent : duel.challenger));
+  const opponentUser = isChallenger ? duel.expand?.opponent : duel.expand?.challenger;
   
   const isCompleted = duel.status === DuelStatus.COMPLETED;
   const myChoice = isChallenger ? duel.challenger_choice : duel.opponent_choice;

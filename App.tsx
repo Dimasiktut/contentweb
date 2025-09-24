@@ -198,10 +198,10 @@ const App: React.FC = () => {
                 pb.collection('options').getFullList<Option>({ requestKey: null }),
                 pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
                 pb.collection('rewards').getFullList<Reward>({ requestKey: null }),
-                pb.collection('duels').getFullList<Duel>({ filter: `(challenger = "${currentUser.id}" || opponent = "${currentUser.id}") && (status != "pending" && status != "accepted")`, sort: '-created', requestKey: null }),
-                pb.collection('duels').getFullList<Duel>({ filter: `opponent = "${currentUser.id}" && status = "pending"`, sort: '-created', requestKey: null }),
-                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "completed"`, sort: '-created', requestKey: null }),
-                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "pending"`, requestKey: null }),
+                pb.collection('duels').getFullList<Duel>({ filter: `(challenger = "${currentUser.id}" || opponent = "${currentUser.id}") && (status != "pending" && status != "accepted")`, sort: '-created', requestKey: null, expand: 'challenger,opponent,winner' }),
+                pb.collection('duels').getFullList<Duel>({ filter: `opponent = "${currentUser.id}" && status = "pending"`, sort: '-created', requestKey: null, expand: 'challenger,opponent' }),
+                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "completed"`, sort: '-created', requestKey: null, expand: 'player_white,player_black,winner' }),
+                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "pending"`, requestKey: null, expand: 'player_white,player_black' }),
             ]);
 
             setUsers(usersRes.sort((a, b) => b.stats_wins - a.stats_wins));
@@ -225,7 +225,7 @@ const App: React.FC = () => {
             // Check for an ongoing duel to rejoin
             try {
                 const activeDuelFilter = `(challenger = "${currentUser.id}" && status = "${DuelStatus.PENDING}") || ((challenger = "${currentUser.id}" || opponent = "${currentUser.id}") && (status = "${DuelStatus.ACCEPTED}" || status = "${DuelStatus.CHALLENGER_CHOSE}" || status = "${DuelStatus.OPPONENT_CHOSE}"))`;
-                const ongoingDuel = await pb.collection('duels').getFirstListItem<Duel>(activeDuelFilter, { requestKey: null });
+                const ongoingDuel = await pb.collection('duels').getFirstListItem<Duel>(activeDuelFilter, { requestKey: null, expand: 'challenger,opponent' });
                 if (ongoingDuel) {
                     setActiveDuel(ongoingDuel);
                     setView(AppView.DUEL);
@@ -237,7 +237,7 @@ const App: React.FC = () => {
             // Check for an ongoing chess game to rejoin
             try {
                 const activeChessFilter = `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "${ChessGameStatus.ONGOING}"`;
-                const ongoingChessGame = await pb.collection('chess_games').getFirstListItem<ChessGame>(activeChessFilter, { requestKey: null });
+                const ongoingChessGame = await pb.collection('chess_games').getFirstListItem<ChessGame>(activeChessFilter, { requestKey: null, expand: 'player_white,player_black' });
                 if (ongoingChessGame) {
                     setActiveChessGame(ongoingChessGame);
                     setView(AppView.CHESS);
@@ -265,19 +265,32 @@ const App: React.FC = () => {
       subscribeToCollection('options', (e) => { /* ... no changes ... */ });
       subscribeToCollection('history', (e) => { /* ... no changes ... */ });
       subscribeToCollection('purchases', (e) => { /* ... no changes ... */ });
-      subscribeToCollection('duels', (e) => { /* ... logic is mostly the same, minor adjustments for clarity ... */ 
+      subscribeToCollection('duels', (e) => { 
         const record = e.record as Duel;
         const isParticipant = record.challenger === currentUser.id || record.opponent === currentUser.id;
 
         if (!isParticipant) return;
 
         if (e.action === 'create' && record.status === DuelStatus.PENDING && record.opponent === currentUser.id) {
-            setPendingDuels(prev => [record, ...prev]);
+            pb.collection('duels').getOne<Duel>(record.id, { expand: 'challenger,opponent' })
+             .then(newDuel => setPendingDuels(prev => [newDuel, ...prev]))
+             .catch(err => console.error("Failed to fetch new pending duel:", err));
         } else if (e.action === 'update') {
             if (record.status !== DuelStatus.PENDING) setPendingDuels(prev => prev.filter(d => d.id !== record.id));
-            if (activeDuel?.id === record.id) setActiveDuel(record);
+            if (activeDuel?.id === record.id) {
+                pb.collection('duels').getOne<Duel>(record.id, { expand: 'challenger,opponent' })
+                    .then(setActiveDuel)
+                    .catch(err => {
+                        console.error("Failed to re-fetch active duel:", err);
+                        setActiveDuel(record); // fallback
+                    });
+            }
             if ([DuelStatus.COMPLETED, DuelStatus.DECLINED, DuelStatus.CANCELLED, DuelStatus.EXPIRED].includes(record.status)) {
-                setDuelHistory(prev => [record, ...prev.filter(d => d.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                pb.collection('duels').getOne<Duel>(record.id, { expand: 'challenger,opponent,winner' })
+                    .then(newHistoryItem => {
+                        setDuelHistory(prev => [newHistoryItem, ...prev.filter(d => d.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                    })
+                    .catch(err => console.error("Failed to fetch duel history item:", err));
             }
         } else if (e.action === 'delete') {
             setPendingDuels(prev => prev.filter(d => d.id !== record.id));
@@ -296,12 +309,25 @@ const App: React.FC = () => {
         if (!isParticipant) return;
 
         if (e.action === 'create' && record.status === ChessGameStatus.PENDING && record.player_black === currentUser.id) {
-            setPendingChessGames(prev => [record, ...prev]);
+            pb.collection('chess_games').getOne<ChessGame>(record.id, { expand: 'player_white,player_black' })
+              .then(newGame => setPendingChessGames(prev => [newGame, ...prev]))
+              .catch(err => console.error("Failed to fetch new pending chess game:", err));
         } else if (e.action === 'update') {
             if (record.status !== ChessGameStatus.PENDING) setPendingChessGames(prev => prev.filter(g => g.id !== record.id));
-            if (activeChessGame?.id === record.id) setActiveChessGame(record);
+            if (activeChessGame?.id === record.id) {
+                 pb.collection('chess_games').getOne<ChessGame>(record.id, { expand: 'player_white,player_black' })
+                    .then(setActiveChessGame)
+                    .catch(err => {
+                        console.error("Failed to re-fetch active chess game:", err);
+                        setActiveChessGame(record); // fallback
+                    });
+            }
             if ([ChessGameStatus.COMPLETED, ChessGameStatus.DECLINED, ChessGameStatus.CANCELLED].includes(record.status)) {
-                setChessHistory(prev => [record, ...prev.filter(g => g.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                 pb.collection('chess_games').getOne<ChessGame>(record.id, { expand: 'player_white,player_black,winner' })
+                    .then(newHistoryItem => {
+                        setChessHistory(prev => [newHistoryItem, ...prev.filter(g => g.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                    })
+                    .catch(err => console.error("Failed to fetch chess history item:", err));
             }
         } else if (e.action === 'delete') {
             setPendingChessGames(prev => prev.filter(g => g.id !== record.id));
@@ -355,7 +381,7 @@ const App: React.FC = () => {
         fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         turn: 'w',
         pgn: ''
-      }, { requestKey: null });
+      }, { requestKey: null, expand: 'player_white,player_black' });
       setActiveChessGame(newGame);
       setView(AppView.CHESS);
     } catch (error) {
@@ -373,7 +399,7 @@ const App: React.FC = () => {
     try {
       const updatedGame = await pb.collection('chess_games').update<ChessGame>(game.id, {
         status: ChessGameStatus.ONGOING,
-      }, { requestKey: null });
+      }, { requestKey: null, expand: 'player_white,player_black' });
       setActiveChessGame(updatedGame);
       setView(AppView.CHESS);
     } catch(error) {
@@ -464,7 +490,6 @@ const App: React.FC = () => {
               chessHistory={chessHistory}
               pendingDuels={pendingDuels}
               pendingChessGames={pendingChessGames}
-              users={users} 
               currentUser={currentUser} 
               onAcceptDuel={handleAcceptDuel}
               onDeclineDuel={handleDeclineDuel}
@@ -473,10 +498,10 @@ const App: React.FC = () => {
             />
           )}
           {view === AppView.DUEL && activeDuel && (
-            <DuelView currentUser={currentUser} duel={activeDuel} users={users} onMakeChoice={handleMakeDuelChoice} onClose={handleCloseDuel} onCancel={handleCancelDuel} />
+            <DuelView currentUser={currentUser} duel={activeDuel} onMakeChoice={handleMakeDuelChoice} onClose={handleCloseDuel} onCancel={handleCancelDuel} />
           )}
           {view === AppView.CHESS && activeChessGame && (
-            <ChessView currentUser={currentUser} game={activeChessGame} users={users} onMove={handleMakeChessMove} onClose={handleCloseChessGame} />
+            <ChessView currentUser={currentUser} game={activeChessGame} onMove={handleMakeChessMove} onClose={handleCloseChessGame} />
           )}
           {view === AppView.GUIDE && <GuideView />}
         </main>

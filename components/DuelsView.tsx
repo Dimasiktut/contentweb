@@ -7,7 +7,6 @@ interface GamesViewProps {
   chessHistory: ChessGame[];
   pendingDuels: Duel[];
   pendingChessGames: ChessGame[];
-  users: User[];
   currentUser: User;
   onAcceptDuel: (duel: Duel) => void;
   onDeclineDuel: (duelId: string) => void;
@@ -83,20 +82,19 @@ const ChessInvitationCard: React.FC<{
   </div>
 );
 
-const ChessHistoryItem: React.FC<{ game: ChessGame; users: User[]; currentUser: User; }> = ({ game, users, currentUser }) => {
+const ChessHistoryItem: React.FC<{ game: ChessGame; currentUser: User; }> = ({ game, currentUser }) => {
     const isWhite = game.player_white === currentUser.id;
-    const opponentId = isWhite ? game.player_black : game.player_white;
-    const opponent = users.find(u => u.id === opponentId);
+    const opponent = isWhite ? game.expand?.player_black : game.expand?.player_white;
 
     const getResult = () => {
         switch (game.status) {
-            case ChessGameStatus.DECLINED: return { text: 'Отклонена', color: 'text-gray-400' };
-            case ChessGameStatus.CANCELLED: return { text: 'Отменена', color: 'text-gray-400' };
+            case ChessGameStatus.DECLINED: return { text: 'Отклонена', color: 'text-gray-400', stake: '' };
+            case ChessGameStatus.CANCELLED: return { text: 'Отменена', color: 'text-gray-400', stake: '' };
             case ChessGameStatus.COMPLETED:
-                if (!game.winner) return { text: 'Ничья', color: 'text-amber-400' };
-                if (game.winner === currentUser.id) return { text: `Победа (+${game.stake})`, color: 'text-green-400' };
-                return { text: `Поражение (-${game.stake})`, color: 'text-red-400' };
-            default: return { text: 'Неизвестно', color: 'text-gray-500' };
+                if (!game.winner) return { text: 'Ничья', color: 'text-amber-400', stake: '' };
+                if (game.winner === currentUser.id) return { text: `Победа`, color: 'text-green-400', stake: `+${game.stake}` };
+                return { text: `Поражение`, color: 'text-red-400', stake: `-${game.stake}` };
+            default: return { text: 'Неизвестно', color: 'text-gray-500', stake: '' };
         }
     };
     const result = getResult();
@@ -108,7 +106,7 @@ const ChessHistoryItem: React.FC<{ game: ChessGame; users: User[]; currentUser: 
         <div className="flex justify-between items-start">
             <div>
                 <p className="text-lg font-semibold text-tg-text">Шахматы против <span className="text-tg-link">@{opponent.username}</span></p>
-                <p className={`text-sm font-bold ${result.color}`}>{result.text}</p>
+                <p className={`text-sm font-bold ${result.color}`}>{result.text} {result.stake && `(${result.stake} 🪙)`}</p>
             </div>
             <div className="text-right flex-shrink-0 ml-2">
                 <div className="flex items-center justify-end font-bold text-amber-400">
@@ -121,14 +119,14 @@ const ChessHistoryItem: React.FC<{ game: ChessGame; users: User[]; currentUser: 
     );
 };
 
-const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendingDuels, pendingChessGames, users, currentUser, onAcceptDuel, onDeclineDuel, onAcceptChess, onDeclineChess }) => {
+const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendingDuels, pendingChessGames, currentUser, onAcceptDuel, onDeclineDuel, onAcceptChess, onDeclineChess }) => {
   const sortedPendingDuels = [...pendingDuels].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
   const sortedPendingChess = [...pendingChessGames].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
-  const sortedDuelHistory = [...duelHistory].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
-  const sortedChessHistory = [...chessHistory].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+  const combinedHistory = [...duelHistory, ...chessHistory].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 
   const hasPending = sortedPendingDuels.length > 0 || sortedPendingChess.length > 0;
-  const hasHistory = sortedDuelHistory.length > 0 || sortedChessHistory.length > 0;
+  const hasHistory = combinedHistory.length > 0;
 
   if (!hasPending && !hasHistory) {
     return (
@@ -147,13 +145,12 @@ const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendin
           <h2 className="text-xl font-bold mb-3 text-tg-text">Входящие вызовы</h2>
           <div className="space-y-3">
             {sortedPendingDuels.map(duel => {
-              const challenger = users.find(u => u.id === duel.challenger);
+              const challenger = duel.expand?.challenger;
               if (!challenger) return null;
               return <DuelInvitationCard key={duel.id} duel={duel} challenger={challenger} onAccept={() => onAcceptDuel(duel)} onDecline={() => onDeclineDuel(duel.id)} />;
             })}
             {sortedPendingChess.map(game => {
-              const challengerId = game.player_white === currentUser.id ? game.player_black : game.player_white;
-              const challenger = users.find(u => u.id === challengerId);
+              const challenger = game.expand?.player_white;
               if (!challenger) return null;
               return <ChessInvitationCard key={game.id} game={game} challenger={challenger} onAccept={() => onAcceptChess(game)} onDecline={() => onDeclineChess(game.id)} />;
             })}
@@ -165,8 +162,13 @@ const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendin
          <div>
           <h2 className="text-xl font-bold mb-3 text-tg-text">История игр</h2>
           <div className="space-y-3">
-            {sortedDuelHistory.map(duel => <DuelHistoryItem key={duel.id} duel={duel} users={users} currentUser={currentUser} />)}
-            {sortedChessHistory.map(game => <ChessHistoryItem key={game.id} game={game} users={users} currentUser={currentUser} />)}
+             {combinedHistory.map(item => {
+              if (item.collectionName === 'duels') {
+                return <DuelHistoryItem key={item.id} duel={item as Duel} currentUser={currentUser} />;
+              } else {
+                return <ChessHistoryItem key={item.id} game={item as ChessGame} currentUser={currentUser} />;
+              }
+            })}
           </div>
         </div>
       )}

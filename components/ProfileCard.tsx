@@ -32,6 +32,10 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
   };
   
   const favoriteCategory = getFavoriteCategory();
+  
+  const sortedPurchases = [...purchases].sort(
+    (a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()
+  );
 
   const cardClasses = `bg-tg-secondary-bg p-5 rounded-2xl shadow-lg animate-slide-in-up transition-all duration-300 ${
     isCurrentUser ? 'ring-2 ring-tg-link ring-offset-2 ring-offset-tg-bg' : ''
@@ -99,11 +103,11 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
         </div>
       )}
 
-      {isCurrentUser && purchases.length > 0 && (
+      {isCurrentUser && sortedPurchases.length > 0 && (
          <div className="mt-6">
           <h4 className="font-bold text-tg-text mb-2">Мои покупки</h4>
           <div className="space-y-2 max-h-48 overflow-y-auto p-3 bg-tg-bg rounded-lg">
-            {purchases.map(purchase => (
+            {sortedPurchases.map(purchase => (
               <div key={purchase.id} className="flex items-center gap-3 bg-tg-secondary-bg/50 p-2 rounded-md">
                 <span className="text-2xl">{purchase.reward_icon}</span>
                 <div className="flex-grow">

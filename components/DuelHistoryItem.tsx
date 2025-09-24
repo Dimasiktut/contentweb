@@ -3,14 +3,12 @@ import { User, Duel, DuelStatus } from '../types';
 
 interface DuelHistoryItemProps {
   duel: Duel;
-  users: User[];
   currentUser: User;
 }
 
-const DuelHistoryItem: React.FC<DuelHistoryItemProps> = ({ duel, users, currentUser }) => {
+const DuelHistoryItem: React.FC<DuelHistoryItemProps> = ({ duel, currentUser }) => {
   const isChallenger = duel.challenger === currentUser.id;
-  const opponentId = isChallenger ? duel.opponent : duel.challenger;
-  const opponent = users.find(u => u.id === opponentId);
+  const opponent = isChallenger ? duel.expand?.opponent : duel.expand?.challenger;
 
   const getResult = () => {
     switch (duel.status) {

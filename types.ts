@@ -99,6 +99,11 @@ export interface Duel extends BaseRecord {
   challenger_choice?: DuelChoice;
   opponent_choice?: DuelChoice;
   winner?: string; // User ID
+  expand?: {
+    challenger?: User;
+    opponent?: User;
+    winner?: User;
+  };
 }
 
 // Типы для шахмат
@@ -121,4 +126,9 @@ export interface ChessGame extends BaseRecord {
   turn: ChessPlayerColor;
   winner?: string; // User ID
   pgn: string; // Portable Game Notation for move history
+  expand?: {
+    player_white?: User;
+    player_black?: User;
+    winner?: User;
+  };
 }
