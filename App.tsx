@@ -1,12 +1,11 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import { User, Option, AppView, AchievementId, WinRecord } from './types';
-// FIX: The original import of 'pocketbase' caused a module resolution conflict with a local file.
-// The PocketBase client instance is now initialized in and imported from `./pocketbase.ts` to resolve the issue.
+// FIX: The PocketBase client instance is now imported from the local `./pocketbase.ts`
+// module to centralize its configuration and resolve build-time module conflicts.
 import { pb, type RecordSubscription } from './pocketbase';
 
 declare global {
@@ -78,24 +77,26 @@ const App: React.FC = () => {
     pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory);
 
     // Subscriptions
-    const unsubscribers = [
-        pb.collection('users').subscribe('*', (e: RecordSubscription<User>) => {
-            setUsers(prev => {
-              const filtered = prev.filter(u => u.id !== e.record.id);
-              return e.action === 'delete' ? filtered : [...filtered, e.record];
-            });
-        }),
-        pb.collection('options').subscribe('*', (e: RecordSubscription<Option>) => {
-            setOptions(prev => {
-                if (e.action === 'delete') return prev.filter(o => o.id !== e.record.id);
-                if (e.action === 'create') return [...prev, e.record];
-                return prev.map(o => o.id === e.record.id ? e.record : o);
-            });
-        }),
-        pb.collection('history').subscribe('*', (e: RecordSubscription<WinRecord>) => {
-             setWinHistory(prev => [e.record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
-        })
-    ];
+    const unsubscribers: (() => void)[] = [];
+
+    pb.collection('users').subscribe('*', (e: RecordSubscription<User>) => {
+        setUsers(prev => {
+          const filtered = prev.filter(u => u.id !== e.record.id);
+          return e.action === 'delete' ? filtered : [...filtered, e.record].sort((a,b) => b.stats_wins - a.stats_wins);
+        });
+    }).then(unsub => unsubscribers.push(unsub));
+
+    pb.collection('options').subscribe('*', (e: RecordSubscription<Option>) => {
+        setOptions(prev => {
+            if (e.action === 'delete') return prev.filter(o => o.id !== e.record.id);
+            if (e.action === 'create') return [...prev, e.record];
+            return prev.map(o => o.id === e.record.id ? e.record : o);
+        });
+    }).then(unsub => unsubscribers.push(unsub));
+
+    pb.collection('history').subscribe('*', (e: RecordSubscription<WinRecord>) => {
+         setWinHistory(prev => [e.record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
+    }).then(unsub => unsubscribers.push(unsub));
     
     // Cleanup on unmount
     return () => {
