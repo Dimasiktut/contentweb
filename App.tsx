@@ -1,18 +1,11 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
+import type { RecordSubscription } from 'pocketbase';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import { User, Option, AppView, AchievementId, WinRecord } from './types';
 import { pb } from './pocketbase';
-
-// FIX: The type `RecordSubscription` could not be imported from 'pocketbase' due to a module resolution issue.
-// It is defined here locally to ensure type safety for subscription callbacks.
-type RecordSubscription<T> = {
-    action: "create" | "update" | "delete";
-    record: T;
-};
 
 declare global {
   interface Window {
