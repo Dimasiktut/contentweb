@@ -10,12 +10,16 @@ interface ProfileCardProps {
   currentUser: User;
   onInitiateDuel: (opponent: User) => void;
   onInitiateChess: (opponent: User) => void;
+  onInitiateTictactoe: (opponent: User) => void;
+  onPokeUser: (opponent: User) => void;
 }
 
 const DUEL_COST = 10;
 const CHESS_COST = 25;
+const POKE_COST = 5;
+const TICTACTOE_COST = 5;
 
-const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, isCurrentUser, currentUser, onInitiateDuel, onInitiateChess }) => {
+const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, isCurrentUser, currentUser, onInitiateDuel, onInitiateChess, onInitiateTictactoe, onPokeUser }) => {
   const getFavoriteCategory = (): string => {
     const userWins = winHistory.filter(win => win.author === user.id);
     if (userWins.length === 0) {
@@ -48,10 +52,20 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
           <span className="absolute -top-3 -left-3 bg-tg-link text-white text-xs font-bold px-2 py-1 rounded-full z-10">Вы</span>
         )}
         <img src={user.avatarUrl} alt={user.username} className="w-20 h-20 rounded-full border-4 border-tg-bg" />
-        <div>
+        <div className="flex-grow">
           <h3 className="text-xl font-bold">@{user.username}</h3>
           <p className="text-tg-hint">{user.role}</p>
         </div>
+         {!isCurrentUser && (
+           <button
+             onClick={() => onPokeUser(user)}
+             disabled={(currentUser.points || 0) < POKE_COST}
+             className="flex-shrink-0 bg-teal-500 text-white w-14 h-14 rounded-full flex flex-col items-center justify-center hover:bg-teal-600 transition-all duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed group transform hover:scale-110"
+             title={`Покнуть (-${POKE_COST} 🪙)`}
+           >
+            <span className="text-3xl transition-transform duration-300 group-hover:rotate-12">😉</span>
+           </button>
+        )}
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-5 text-center">
@@ -74,20 +88,27 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
       </div>
       
       {!isCurrentUser && (
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="mt-5 grid grid-cols-3 gap-2 text-xs">
           <button
             onClick={() => onInitiateDuel(user)}
             disabled={(currentUser.points || 0) < DUEL_COST || (user.points || 0) < DUEL_COST}
             className="w-full bg-red-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-red-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
           >
-            Дуэль (-{DUEL_COST} 🪙)
+            Дуэль<br/>(-{DUEL_COST} 🪙)
           </button>
           <button
             onClick={() => onInitiateChess(user)}
             disabled={(currentUser.points || 0) < CHESS_COST || (user.points || 0) < CHESS_COST}
             className="w-full bg-blue-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
           >
-            Шахматы (-{CHESS_COST} 🪙)
+            Шахматы<br/>(-{CHESS_COST} 🪙)
+          </button>
+          <button
+            onClick={() => onInitiateTictactoe(user)}
+            disabled={(currentUser.points || 0) < TICTACTOE_COST || (user.points || 0) < TICTACTOE_COST}
+            className="w-full bg-purple-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-purple-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
+          >
+            К/Н<br/>(-{TICTACTOE_COST} 🪙)
           </button>
         </div>
       )}

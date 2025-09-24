@@ -9,9 +9,11 @@ interface ProfileViewProps {
   currentUser: User;
   onInitiateDuel: (opponent: User) => void;
   onInitiateChess: (opponent: User) => void;
+  onInitiateTictactoe: (opponent: User) => void;
+  onPokeUser: (opponent: User) => void;
 }
 
-const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, purchases, currentUser, onInitiateDuel, onInitiateChess }) => {
+const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, purchases, currentUser, onInitiateDuel, onInitiateChess, onInitiateTictactoe, onPokeUser }) => {
   const sortedUsers = [...users].sort((a, b) => {
     if (a.id === currentUser.id) return -1;
     if (b.id === currentUser.id) return 1;
@@ -30,6 +32,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, purchases,
           currentUser={currentUser}
           onInitiateDuel={onInitiateDuel}
           onInitiateChess={onInitiateChess}
+          onInitiateTictactoe={onInitiateTictactoe}
+          onPokeUser={onPokeUser}
         />
       ))}
     </div>

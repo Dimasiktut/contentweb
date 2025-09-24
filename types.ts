@@ -66,6 +66,7 @@ export enum AppView {
   GAMES_VIEW = 'GAMES_VIEW',
   GUIDE = 'GUIDE',
   CHESS = 'CHESS',
+  TICTACTOE = 'TICTACTOE',
 }
 
 // Награды в магазине
@@ -136,6 +137,33 @@ export interface ChessGame extends BaseRecord {
   expand?: {
     player_white?: User;
     player_black?: User;
+    winner?: User;
+  };
+}
+
+// Типы для Крестиков-ноликов
+export enum TictactoeGameStatus {
+  PENDING = 'pending',
+  ONGOING = 'ongoing',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  DECLINED = 'declined',
+}
+
+export type TictactoePlayerSymbol = 'x' | 'o';
+export type TictactoeBoard = (TictactoePlayerSymbol | null)[]; // Array of 9
+
+export interface TictactoeGame extends BaseRecord {
+  player_x: string; // User ID
+  player_o: string; // User ID
+  stake: number;
+  status: TictactoeGameStatus;
+  board: TictactoeBoard;
+  turn: TictactoePlayerSymbol;
+  winner?: string; // User ID
+  expand?: {
+    player_x?: User;
+    player_o?: User;
     winner?: User;
   };
 }

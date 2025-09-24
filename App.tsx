@@ -9,7 +9,8 @@ import DuelView from './components/DuelView';
 import GamesView from './components/DuelsView';
 import GuideView from './components/GuideView';
 import ChessView from './components/ChessView';
-import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription } from './types';
+import TictactoeView from './components/TictactoeView';
+import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription, TictactoeGame, TictactoeGameStatus, TictactoeBoard, TictactoePlayerSymbol } from './types';
 import { pb } from './pocketbase';
 
 declare global {
@@ -22,6 +23,9 @@ declare global {
 const LOCAL_STORAGE_USER_KEY = 'team-roulette-user-id';
 const DUEL_COST = 10;
 const CHESS_COST = 25;
+const POKE_COST = 5;
+const TICTACTOE_COST = 5;
+
 const CHOICES: Record<DuelChoice, { name: string; icon: string; beats: DuelChoice }> = {
   rock: { name: 'Камень', icon: '✊', beats: 'scissors' },
   paper: { name: 'Бумага', icon: '✋', beats: 'rock' },
@@ -67,6 +71,7 @@ const App: React.FC = () => {
   const [winHistory, setWinHistory] = useState<WinRecord[]>([]);
   const [duelHistory, setDuelHistory] = useState<Duel[]>([]);
   const [chessHistory, setChessHistory] = useState<ChessGame[]>([]);
+  const [tictactoeHistory, setTictactoeHistory] = useState<TictactoeGame[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -85,6 +90,10 @@ const App: React.FC = () => {
   const [activeChessGame, setActiveChessGame] = useState<ChessGame | null>(null);
   const [pendingChessGames, setPendingChessGames] = useState<ChessGame[]>([]);
   const [ongoingChessGames, setOngoingChessGames] = useState<ChessGame[]>([]);
+  const [activeTictactoeGame, setActiveTictactoeGame] = useState<TictactoeGame | null>(null);
+  const [pendingTictactoeGames, setPendingTictactoeGames] = useState<TictactoeGame[]>([]);
+  const [ongoingTictactoeGames, setOngoingTictactoeGames] = useState<TictactoeGame[]>([]);
+
 
   // State to trigger resubscription on websocket reconnect
   const [reconnectCounter, setReconnectCounter] = useState(0);
@@ -242,7 +251,7 @@ const App: React.FC = () => {
         // Data is fetched, and then subscriptions are established.
         // The cleanup function for this effect handles unsubscribing, which is crucial for reconnections.
         try {
-            const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes, ongoingChessGamesRes] = await Promise.all([
+            const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes, ongoingChessGamesRes, tttHistoryRes, pendingTttGamesRes, ongoingTttGamesRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
                 pb.collection('options').getFullList<Option>({ requestKey: null }),
                 pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
@@ -251,7 +260,10 @@ const App: React.FC = () => {
                 pb.collection('duels').getFullList<Duel>({ filter: `opponent = "${currentUser.id}" && status = "pending"`, sort: '-created', requestKey: null, expand: 'challenger,opponent' }),
                 pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "completed"`, sort: '-created', requestKey: null, expand: 'player_white,player_black,winner' }),
                 pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "pending"`, requestKey: null, expand: 'player_white,player_black' }),
-                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "ongoing"`, requestKey: null, expand: 'player_white,player_black' })
+                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "ongoing"`, requestKey: null, expand: 'player_white,player_black' }),
+                pb.collection('tictactoe_games').getFullList<TictactoeGame>({ filter: `(player_x = "${currentUser.id}" || player_o = "${currentUser.id}") && status = "completed"`, sort: '-created', requestKey: null, expand: 'player_x,player_o,winner' }),
+                pb.collection('tictactoe_games').getFullList<TictactoeGame>({ filter: `(player_x = "${currentUser.id}" || player_o = "${currentUser.id}") && status = "pending"`, requestKey: null, expand: 'player_x,player_o' }),
+                pb.collection('tictactoe_games').getFullList<TictactoeGame>({ filter: `(player_x = "${currentUser.id}" || player_o = "${currentUser.id}") && status = "ongoing"`, requestKey: null, expand: 'player_x,player_o' })
             ]);
 
             setUsers(usersRes.sort((a, b) => b.stats_wins - a.stats_wins));
@@ -263,6 +275,10 @@ const App: React.FC = () => {
             setChessHistory(chessHistoryRes);
             setPendingChessGames(pendingChessGamesRes.filter(g => g.player_black === currentUser.id)); // Only opponent gets pending games
             setOngoingChessGames(ongoingChessGamesRes);
+            setTictactoeHistory(tttHistoryRes);
+            setPendingTictactoeGames(pendingTttGamesRes.filter(g => g.player_o === currentUser.id)); // Player 'O' is the opponent
+            setOngoingTictactoeGames(ongoingTttGamesRes);
+
 
             try {
                 const purchasesRes = await pb.collection('purchases').getFullList<Purchase>({ filter: `user = "${currentUser.id}"`, sort: '-created', requestKey: null });
@@ -389,7 +405,57 @@ const App: React.FC = () => {
             }
         }
       });
+      
+      subscribeToCollection('tictactoe_games', (e) => {
+        const record = e.record as TictactoeGame;
+        const isParticipant = record.player_x === currentUser.id || record.player_o === currentUser.id;
 
+        if (!isParticipant) return;
+
+        if (e.action === 'create' && record.status === TictactoeGameStatus.PENDING && record.player_o === currentUser.id) {
+            pb.collection('tictactoe_games').getOne<TictactoeGame>(record.id, { expand: 'player_x,player_o' })
+              .then(newGame => setPendingTictactoeGames(prev => [newGame, ...prev]))
+              .catch(err => console.error("Failed to fetch new pending tictactoe game:", err));
+        } else if (e.action === 'update') {
+            if (record.status === TictactoeGameStatus.ONGOING) {
+                 pb.collection('tictactoe_games').getOne<TictactoeGame>(record.id, { expand: 'player_x,player_o' })
+                    .then(game => setOngoingTictactoeGames(prev => {
+                        const exists = prev.some(g => g.id === game.id);
+                        return exists ? prev.map(g => (g.id === game.id ? game : g)) : [...prev, game];
+                    }))
+                    .catch(err => console.error("Failed to update ongoing tictactoe games list:", err));
+            } else {
+                 setOngoingTictactoeGames(prev => prev.filter(g => g.id !== record.id));
+            }
+
+            if (record.status !== TictactoeGameStatus.PENDING) setPendingTictactoeGames(prev => prev.filter(g => g.id !== record.id));
+
+            if (activeTictactoeGame?.id === record.id) {
+                pb.collection('tictactoe_games').getOne<TictactoeGame>(record.id, { expand: 'player_x,player_o' })
+                   .then(setActiveTictactoeGame)
+                   .catch(err => {
+                       console.error("Failed to re-fetch active tictactoe game:", err);
+                       setActiveTictactoeGame(record); // fallback
+                   });
+            }
+
+            if ([TictactoeGameStatus.COMPLETED, TictactoeGameStatus.DECLINED, TictactoeGameStatus.CANCELLED].includes(record.status)) {
+                pb.collection('tictactoe_games').getOne<TictactoeGame>(record.id, { expand: 'player_x,player_o,winner' })
+                   .then(newHistoryItem => {
+                       setTictactoeHistory(prev => [newHistoryItem, ...prev.filter(g => g.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                   })
+                   .catch(err => console.error("Failed to fetch tictactoe history item:", err));
+            }
+        } else if (e.action === 'delete') {
+            setPendingTictactoeGames(prev => prev.filter(g => g.id !== record.id));
+            setOngoingTictactoeGames(prev => prev.filter(g => g.id !== record.id));
+            if (activeTictactoeGame?.id === record.id) {
+               setActiveTictactoeGame(null);
+               setView(AppView.PROFILES);
+               alert("Партия была отменена администратором.");
+           }
+        }
+      });
     }
 
     setupSubscriptions();
@@ -399,7 +465,7 @@ const App: React.FC = () => {
     return () => {
         pb.realtime.unsubscribe();
     };
-}, [currentUser, activeDuel, activeChessGame, reconnectCounter]);
+}, [currentUser, activeDuel, activeChessGame, activeTictactoeGame, reconnectCounter]);
 
   const handleAddOption = useCallback(async (text: string, category: string) => { /* ... no changes ... */ }, [currentUser]);
   const handleRemoveOption = useCallback(async (idToRemove: string) => { /* ... no changes ... */ }, []);
@@ -408,6 +474,35 @@ const App: React.FC = () => {
   const handleAnimationComplete = useCallback(async (winnerOption: Option) => { /* ... no changes ... */ }, [currentUser, handleSpinEnd]);
   const handleBuyReward = useCallback(async (reward: Reward) => { /* ... no changes ... */ }, [currentUser]);
   
+  // Poke Handler
+  const handlePokeUser = useCallback(async (opponent: User) => {
+    if (!currentUser || currentUser.points < POKE_COST) {
+      alert("Недостаточно баллов для пока.");
+      return;
+    }
+    if (!confirm(`"Покнуть" @${opponent.username} за ${POKE_COST} 🪙?\nОн(а) получит 1 🪙.`)) return;
+
+    const originalUser = currentUser; // Keep a reference to revert on error
+    try {
+      // Optimistic UI update for responsiveness
+      setCurrentUser(prev => prev ? { ...prev, points: prev.points - POKE_COST } : null);
+
+      // Perform DB operations
+      await Promise.all([
+        pb.collection('users').update(currentUser.id, { 'points-': POKE_COST }),
+        pb.collection('users').update(opponent.id, { 'points+': 1 }), // Poked user gets 1 point
+      ]);
+
+      alert(`Вы успешно "покнули" @${opponent.username}!`);
+      
+    } catch (error) {
+      console.error("Failed to poke user:", error);
+      alert(`Не удалось "покнуть" пользователя: ${getPocketbaseError(error)}`);
+      // Revert optimistic update on failure
+      setCurrentUser(originalUser);
+    }
+  }, [currentUser]);
+
   // Duel Handlers
   const handleInitiateDuel = useCallback(async (opponent: User) => { /* ... no changes ... */ }, [currentUser]);
   const handleAcceptDuel = useCallback(async (duel: Duel) => { /* ... no changes ... */ }, [currentUser]);
@@ -547,6 +642,121 @@ const App: React.FC = () => {
     setView(AppView.GAMES_VIEW);
   }, []);
 
+  // Tic-Tac-Toe Handlers
+  const handleInitiateTictactoe = useCallback(async (opponent: User) => {
+    if (!currentUser || currentUser.points < TICTACTOE_COST || opponent.points < TICTACTOE_COST) {
+        alert("Недостаточно баллов для игры.");
+        return;
+    }
+    if (!confirm(`Вызвать @${opponent.username} на партию в Крестики-нолики? Ставка: ${TICTACTOE_COST} 🪙`)) return;
+
+    try {
+        const newGame = await pb.collection('tictactoe_games').create<TictactoeGame>({
+            player_x: currentUser.id,
+            player_o: opponent.id,
+            stake: TICTACTOE_COST,
+            status: TictactoeGameStatus.PENDING,
+            board: Array(9).fill(null),
+            turn: 'x',
+        }, { requestKey: null, expand: 'player_x,player_o' });
+        setActiveTictactoeGame(newGame);
+        setView(AppView.TICTACTOE);
+    } catch (error) {
+        console.error("Failed to initiate tictactoe game:", error);
+        alert(`Не удалось начать партию: ${getPocketbaseError(error)}`);
+    }
+  }, [currentUser]);
+
+  const handleAcceptTictactoe = useCallback(async (game: TictactoeGame) => {
+    if (!currentUser || currentUser.points < TICTACTOE_COST) {
+        alert("Недостаточно баллов для принятия вызова!");
+        await pb.collection('tictactoe_games').update(game.id, { status: TictactoeGameStatus.DECLINED }).catch();
+        return;
+    }
+    try {
+        const updatedGame = await pb.collection('tictactoe_games').update<TictactoeGame>(game.id, {
+            status: TictactoeGameStatus.ONGOING,
+        }, { requestKey: null, expand: 'player_x,player_o' });
+        setActiveTictactoeGame(updatedGame);
+        setView(AppView.TICTACTOE);
+    } catch(error) {
+        console.error("Failed to accept tictactoe game:", error);
+        alert("Не удалось принять вызов.");
+    }
+  }, [currentUser]);
+
+  const handleDeclineTictactoe = useCallback(async (gameId: string) => {
+    try { await pb.collection('tictactoe_games').update(gameId, { status: TictactoeGameStatus.DECLINED }); }
+    catch(error) { console.error("Failed to decline tictactoe game:", error); }
+  }, []);
+
+  const checkTttWinner = useCallback((board: TictactoeBoard): TictactoePlayerSymbol | null => {
+    const lines = [ [0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6] ];
+    for (const line of lines) {
+        const [a, b, c] = line;
+        if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+            return board[a];
+        }
+    }
+    return null;
+  }, []);
+
+  const handleMakeTictactoeMove = useCallback(async (index: number) => {
+    if (!activeTictactoeGame || !currentUser) return;
+
+    const { board, turn, player_x, player_o, status } = activeTictactoeGame;
+    const mySymbol = player_x === currentUser.id ? 'x' : 'o';
+
+    if (status !== TictactoeGameStatus.ONGOING || turn !== mySymbol || board[index] !== null) {
+        console.warn("Invalid move attempt.");
+        return;
+    }
+
+    const newBoard = [...board];
+    newBoard[index] = turn;
+    const winnerSymbol = checkTttWinner(newBoard);
+    const isDraw = !winnerSymbol && newBoard.every(cell => cell !== null);
+
+    const updatePayload: Partial<TictactoeGame> & {[key:string]: any} = {
+        board: newBoard,
+        turn: turn === 'x' ? 'o' : 'x'
+    };
+    
+    if (winnerSymbol || isDraw) {
+        updatePayload.status = TictactoeGameStatus.COMPLETED;
+        if (winnerSymbol) {
+            const winnerId = winnerSymbol === 'x' ? player_x : player_o;
+            const loserId = winnerSymbol === 'x' ? player_o : player_x;
+            updatePayload.winner = winnerId;
+            try {
+                await Promise.all([
+                    pb.collection('users').update(winnerId, { 'points+': TICTACTOE_COST }),
+                    pb.collection('users').update(loserId, { 'points-': TICTACTOE_COST })
+                ]);
+            } catch (e) {
+                console.error("CRITICAL: Failed to update points after tictactoe game.", e);
+            }
+        }
+    }
+    
+    try {
+        await pb.collection('tictactoe_games').update<TictactoeGame>(activeTictactoeGame.id, updatePayload);
+    } catch (error) {
+        console.error("Failed to make tictactoe move:", error);
+    }
+  }, [activeTictactoeGame, currentUser, checkTttWinner]);
+
+  const handleJoinTictactoeGame = useCallback((game: TictactoeGame) => {
+    setActiveTictactoeGame(game);
+    setView(AppView.TICTACTOE);
+  }, []);
+
+  const handleCloseTictactoeGame = useCallback(() => {
+    setActiveTictactoeGame(null);
+    setView(AppView.GAMES_VIEW);
+  }, []);
+
+
   if (isLoading) { /* ... no changes ... */ }
   if (!currentUser) { /* ... no changes ... */ }
 
@@ -564,22 +774,28 @@ const App: React.FC = () => {
         <Header currentView={view} setView={setView} currentUser={currentUser} />
         <main className="mt-4">
           {view === AppView.ROULETTE && <Roulette options={options} users={users} onAddOption={handleAddOption} onRemoveOption={handleRemoveOption} onSpinRequest={handleSpinRequest} onAnimationComplete={handleAnimationComplete} currentUser={currentUser} isSpinning={isSpinning} isProcessingWin={isProcessingWin} winnerForAnimation={winnerForAnimation} />}
-          {view === AppView.PROFILES && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} onInitiateChess={handleInitiateChess} />}
+          {view === AppView.PROFILES && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} onInitiateChess={handleInitiateChess} onInitiateTictactoe={handleInitiateTictactoe} onPokeUser={handlePokeUser} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
           {view === AppView.GAMES_VIEW && (
             <GamesView 
               duelHistory={duelHistory}
               chessHistory={chessHistory}
+              tictactoeHistory={tictactoeHistory}
               pendingDuels={pendingDuels}
               pendingChessGames={pendingChessGames}
+              pendingTictactoeGames={pendingTictactoeGames}
               ongoingChessGames={ongoingChessGames}
+              ongoingTictactoeGames={ongoingTictactoeGames}
               currentUser={currentUser} 
               onAcceptDuel={handleAcceptDuel}
               onDeclineDuel={handleDeclineDuel}
               onAcceptChess={handleAcceptChess}
               onDeclineChess={handleDeclineChess}
               onJoinChessGame={handleJoinChessGame}
+              onAcceptTictactoe={handleAcceptTictactoe}
+              onDeclineTictactoe={handleDeclineTictactoe}
+              onJoinTictactoeGame={handleJoinTictactoeGame}
             />
           )}
           {view === AppView.DUEL && activeDuel && (
@@ -587,6 +803,9 @@ const App: React.FC = () => {
           )}
           {view === AppView.CHESS && activeChessGame && (
             <ChessView currentUser={currentUser} game={activeChessGame} onMove={handleMakeChessMove} onClose={handleCloseChessGame} />
+          )}
+          {view === AppView.TICTACTOE && activeTictactoeGame && (
+            <TictactoeView currentUser={currentUser} game={activeTictactoeGame} onMove={handleMakeTictactoeMove} onClose={handleCloseTictactoeGame} />
           )}
           {view === AppView.GUIDE && <GuideView />}
         </main>
