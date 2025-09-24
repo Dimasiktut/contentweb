@@ -7,7 +7,8 @@ import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import RewardsView from './components/RewardsView';
 import DuelView from './components/DuelView';
-import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase } from './types';
+import DuelInvitation from './components/DuelInvitation';
+import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice } from './types';
 import { pb } from './pocketbase';
 
 // FIX: Added local type definition for RecordSubscription to replace the removed import.
@@ -24,7 +25,11 @@ declare global {
 
 const LOCAL_STORAGE_USER_KEY = 'team-roulette-user-id';
 const DUEL_COST = 10;
-
+const CHOICES: Record<DuelChoice, { name: string; icon: string; beats: DuelChoice }> = {
+  rock: { name: 'Камень', icon: '✊', beats: 'scissors' },
+  paper: { name: 'Бумага', icon: '✋', beats: 'rock' },
+  scissors: { name: 'Ножницы', icon: '✌️', beats: 'paper' },
+};
 
 // Helper function to check if it's a new day
 const needsEnergyUpdate = (lastUpdateDate: string | null): boolean => {
@@ -54,7 +59,10 @@ const App: React.FC = () => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [isProcessingWin, setIsProcessingWin] = useState(false);
   const [winnerForAnimation, setWinnerForAnimation] = useState<Option | null>(null);
-  const [currentDuel, setCurrentDuel] = useState<{ opponent: User; stake: number } | null>(null);
+  
+  // Real-time duel state
+  const [activeDuel, setActiveDuel] = useState<Duel | null>(null);
+  const [duelInvitations, setDuelInvitations] = useState<Duel[]>([]);
 
 
   // Инициализация Telegram и определение пользователя
@@ -258,6 +266,30 @@ const App: React.FC = () => {
            return prev; // No updates/deletes handled for now
         });
       });
+
+      subscribeToCollection('duels', (e) => {
+        const record = e.record as Duel;
+    
+        if (e.action === 'create' && record.status === DuelStatus.PENDING && record.opponent === currentUser?.id) {
+            if((currentUser?.points || 0) >= DUEL_COST) {
+              setDuelInvitations(prev => [...prev.filter(d => d.id !== record.id), record]);
+            } else {
+                console.log("Received duel invitation but can't afford it.");
+            }
+        } else if (e.action === 'update') {
+            setDuelInvitations(prev => prev.filter(d => d.id !== record.id));
+            if (activeDuel && activeDuel.id === record.id) {
+                setActiveDuel(record);
+            }
+        } else if (e.action === 'delete') {
+            setDuelInvitations(prev => prev.filter(d => d.id !== record.id));
+            if (activeDuel && activeDuel.id === record.id) {
+                setActiveDuel(null);
+                setView(AppView.PROFILES);
+                alert("Дуэль была отменена.");
+            }
+        }
+      });
     }
 
     setupSubscriptions();
@@ -265,7 +297,7 @@ const App: React.FC = () => {
     return () => {
         unsubscribers.forEach(unsub => unsub());
     };
-}, [currentUser]);
+}, [currentUser, activeDuel]);
 
   const handleAddOption = useCallback(async (text: string, category: string) => {
     if (!currentUser || currentUser.energy < 1) return;
@@ -381,16 +413,26 @@ const App: React.FC = () => {
   }, [currentUser]);
 
   const handleInitiateDuel = useCallback(async (opponent: User) => {
-    if (!currentUser || currentUser.points < DUEL_COST) {
-      alert("Недостаточно баллов для вызова на дуэль!");
+    if (!currentUser) return;
+    if (currentUser.points < DUEL_COST) {
+      alert("У вас недостаточно баллов для вызова на дуэль!");
       return;
     }
-    if (!confirm(`Вызвать @${opponent.username} на дуэль? Это будет стоить ${DUEL_COST} баллов.`)) {
+    if (opponent.points < DUEL_COST) {
+      alert(`У @${opponent.username} недостаточно баллов для дуэли!`);
+      return;
+    }
+    if (!confirm(`Вызвать @${opponent.username} на дуэль? Ставка: ${DUEL_COST} 🪙`)) {
       return;
     }
     try {
-      await pb.collection('users').update(currentUser.id, { 'points-': DUEL_COST }, { requestKey: null });
-      setCurrentDuel({ opponent, stake: DUEL_COST });
+      const newDuel = await pb.collection('duels').create<Duel>({
+        challenger: currentUser.id,
+        opponent: opponent.id,
+        stake: DUEL_COST,
+        status: DuelStatus.PENDING,
+      }, { requestKey: null });
+      setActiveDuel(newDuel);
       setView(AppView.DUEL);
     } catch (error) {
       console.error("Failed to initiate duel:", error);
@@ -398,28 +440,84 @@ const App: React.FC = () => {
     }
   }, [currentUser]);
 
-  const handleDuelComplete = useCallback(async (result: 'win' | 'loss' | 'draw') => {
-    if (!currentUser || !currentDuel) return;
-    const prize = currentDuel.stake * 2;
-    try {
-      if (result === 'win') {
-        await pb.collection('users').update(currentUser.id, { 'points+': prize }, { requestKey: null });
-        alert(`Вы выиграли ${prize} баллов!`);
-      } else if (result === 'loss') {
-        await pb.collection('users').update(currentDuel.opponent.id, { 'points+': prize }, { requestKey: null });
-        alert(`Противник выиграл ${prize} баллов.`);
-      } else { // draw
-        await pb.collection('users').update(currentUser.id, { 'points+': currentDuel.stake }, { requestKey: null });
-        alert("Ничья! Ваши баллы возвращены.");
-      }
-    } catch (error) {
-      console.error("Failed to update points after duel:", error);
-      alert("Ошибка при начислении награды.");
-    } finally {
-      setCurrentDuel(null);
-      setView(AppView.PROFILES);
+  const handleAcceptDuel = useCallback(async (duel: Duel) => {
+    if (!currentUser || currentUser.points < DUEL_COST) {
+      alert("Недостаточно баллов для принятия дуэли!");
+      await pb.collection('duels').delete(duel.id, { requestKey: null }).catch();
+      return;
     }
-  }, [currentUser, currentDuel]);
+    try {
+      const updatedDuel = await pb.collection('duels').update<Duel>(duel.id, {
+        status: DuelStatus.ACCEPTED,
+      }, { requestKey: null });
+      setDuelInvitations(prev => prev.filter(d => d.id !== duel.id));
+      setActiveDuel(updatedDuel);
+      setView(AppView.DUEL);
+    } catch(error) {
+      console.error("Failed to accept duel:", error);
+      alert("Не удалось принять дуэль.");
+    }
+  }, [currentUser]);
+
+  const handleDeclineDuel = useCallback(async (duelId: string) => {
+    try {
+      await pb.collection('duels').delete(duelId, { requestKey: null });
+      setDuelInvitations(prev => prev.filter(d => d.id !== duelId));
+    } catch(error) {
+      console.error("Failed to decline duel:", error);
+    }
+  }, []);
+
+  const handleMakeDuelChoice = useCallback(async (choice: DuelChoice) => {
+    if (!activeDuel || !currentUser) return;
+
+    const isChallenger = activeDuel.challenger === currentUser.id;
+    const choiceField: 'challenger_choice' | 'opponent_choice' = isChallenger ? 'challenger_choice' : 'opponent_choice';
+    const opponentChoiceField: 'challenger_choice' | 'opponent_choice' = isChallenger ? 'opponent_choice' : 'challenger_choice';
+    const opponentChoice = activeDuel[opponentChoiceField];
+
+    const updatePayload: Partial<Duel> = { [choiceField]: choice };
+
+    if (opponentChoice) {
+      updatePayload.status = DuelStatus.COMPLETED;
+      const myChoiceData = CHOICES[choice];
+      const opponentChoiceData = CHOICES[opponentChoice];
+
+      let winnerId: string | null = null;
+      if (myChoiceData.beats === opponentChoice) {
+        winnerId = currentUser.id;
+      } else if (opponentChoiceData.beats === choice) {
+        winnerId = isChallenger ? activeDuel.opponent : activeDuel.challenger;
+      }
+      
+      updatePayload.winner = winnerId ?? undefined;
+
+      if (winnerId) {
+        const loserId = winnerId === currentUser.id 
+          ? (isChallenger ? activeDuel.opponent : activeDuel.challenger)
+          : currentUser.id;
+        try {
+          await pb.collection('users').update(winnerId, { 'points+': DUEL_COST }, { requestKey: null });
+          await pb.collection('users').update(loserId, { 'points-': DUEL_COST }, { requestKey: null });
+        } catch (e) {
+            console.error("CRITICAL: Failed to update user points after duel.", e);
+        }
+      }
+    } else {
+      updatePayload.status = isChallenger ? DuelStatus.CHALLENGER_CHOSE : DuelStatus.OPPONENT_CHOSE;
+    }
+    
+    try {
+      await pb.collection('duels').update(activeDuel.id, updatePayload, { requestKey: null });
+    } catch(error) {
+      console.error("Failed to make duel choice", error);
+    }
+  }, [activeDuel, currentUser]);
+
+  const handleCloseDuel = useCallback(() => {
+    setActiveDuel(null);
+    setView(AppView.PROFILES);
+  }, []);
 
   if (isLoading) {
     return (
@@ -451,6 +549,19 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-tg-bg font-sans p-4">
+      {duelInvitations.length > 0 && (
+          <div className="fixed bottom-4 right-4 z-50 space-y-2">
+              {duelInvitations.map(inv => (
+                  <DuelInvitation
+                      key={inv.id}
+                      duel={inv}
+                      users={users}
+                      onAccept={() => handleAcceptDuel(inv)}
+                      onDecline={() => handleDeclineDuel(inv.id)}
+                  />
+              ))}
+          </div>
+      )}
       <div className="max-w-md mx-auto">
         {dataErrors.length > 0 && (
           <div className="bg-red-900/50 border border-red-700 text-red-200 p-3 rounded-xl mb-4 text-sm" role="alert">
@@ -479,12 +590,13 @@ const App: React.FC = () => {
           {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && currentUser && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
-          {view === AppView.DUEL && currentUser && currentDuel && (
+          {view === AppView.DUEL && currentUser && activeDuel && (
             <DuelView
                 currentUser={currentUser}
-                opponent={currentDuel.opponent}
-                stake={currentDuel.stake}
-                onDuelComplete={handleDuelComplete}
+                duel={activeDuel}
+                users={users}
+                onMakeChoice={handleMakeDuelChoice}
+                onClose={handleCloseDuel}
             />
           )}
         </main>
