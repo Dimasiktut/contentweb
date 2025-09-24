@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 // FIX: Removed import of RecordSubscription from 'pocketbase' as it was causing an error. The type is now imported from the local types.ts file.
 import Header from './components/Header';
 import Roulette from './components/Roulette';
@@ -88,6 +88,7 @@ const App: React.FC = () => {
 
   // State to trigger resubscription on websocket reconnect
   const [reconnectCounter, setReconnectCounter] = useState(0);
+  const lastClientIdRef = useRef<string>(pb.realtime.clientId);
 
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
@@ -201,20 +202,37 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Effect to handle realtime connection changes
+  // Effect to handle realtime connection changes by polling the client ID.
+  // This is a workaround because the PocketBase JS SDK does not provide a direct
+  // event listener for connection status changes. The call to pb.realtime.onConnectionChange
+  // was incorrect and has been replaced with this polling mechanism.
   useEffect(() => {
-    // PocketBase JS SDK's onConnectionChange doesn't return an unsubscribe function
-    // and there's no public method to remove a listener. This is a minor leak,
-    // but acceptable as this component is the root and lives for the app's lifetime.
-    pb.realtime.onConnectionChange((status) => {
-      console.log('Realtime connection status:', status);
-      // When the connection is restored, trigger a full data refresh and re-subscription
-      if (status === 'reconnect') {
-        console.log('Reconnected to PocketBase. Refreshing data and subscriptions...');
-        setReconnectCounter(c => c + 1);
+    const intervalId = setInterval(() => {
+      const currentClientId = pb.realtime.clientId;
+
+      // On first connection, just store the new client ID
+      if (!lastClientIdRef.current && currentClientId) {
+        console.log('PocketBase connected with client ID:', currentClientId);
+        lastClientIdRef.current = currentClientId;
+        return;
       }
-    });
-  }, []); // Empty dependency array ensures this runs only once on mount
+      
+      // On reconnection, the client ID will change
+      if (lastClientIdRef.current && currentClientId && lastClientIdRef.current !== currentClientId) {
+        console.log(`PocketBase reconnected. Client ID changed from ${lastClientIdRef.current} to ${currentClientId}. Refreshing data...`);
+        lastClientIdRef.current = currentClientId; // Update to the new ID
+        setReconnectCounter(c => c + 1); // Trigger the refresh
+      }
+      
+      // On disconnection, the client ID is cleared
+      if (lastClientIdRef.current && !currentClientId) {
+        console.log('PocketBase disconnected. Last client ID was:', lastClientIdRef.current);
+        lastClientIdRef.current = '';
+      }
+    }, 2500); // Poll every 2.5 seconds
+
+    return () => clearInterval(intervalId);
+  }, []); // The empty dependency array ensures this effect runs only once on mount.
 
   // Real-time listeners
   useEffect(() => {
