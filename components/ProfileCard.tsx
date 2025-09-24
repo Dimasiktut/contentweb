@@ -52,8 +52,8 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, isCurrentUs
           <p className="text-2xl font-bold">{user.stats_wins}</p>
           <p className="text-sm text-tg-hint">Побед</p>
         </div>
-        <div>
-           <p className="text-2xl font-bold text-tg-link capitalize">{favoriteCategory}</p>
+        <div className="min-w-0 overflow-hidden">
+           <p className="text-2xl font-bold text-tg-link capitalize truncate" title={favoriteCategory}>{favoriteCategory}</p>
           <p className="text-sm text-tg-hint">Любимое</p>
         </div>
       </div>

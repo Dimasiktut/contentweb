@@ -32,6 +32,8 @@ export interface User extends BaseRecord {
   stats_wins: number;
   stats_winStreak: number;
   achievements: AchievementId[];
+  energy: number;
+  last_energy_update: string;
 }
 
 export interface Option extends BaseRecord {

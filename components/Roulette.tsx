@@ -7,6 +7,7 @@ interface RouletteProps {
   onAddOption: (text: string, category: string) => void;
   onRemoveOption: (id: string) => void;
   onWin: (winnerOption: Option) => void;
+  onSpin: () => Promise<void>;
   currentUser: User;
 }
 
@@ -36,7 +37,7 @@ const WinnerModal: React.FC<{ winner: Option; author: User; onClose: () => void 
 };
 
 
-const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemoveOption, onWin }) => {
+const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemoveOption, onWin, onSpin, currentUser }) => {
   const [newOption, setNewOption] = useState('');
   const [newCategory, setNewCategory] = useState('еда');
   const [isSpinning, setIsSpinning] = useState(false);
@@ -50,14 +51,16 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
   }, [options]);
 
   const handleAdd = () => {
-    if (newOption.trim()) {
+    if (newOption.trim() && currentUser.energy >= 1) {
       onAddOption(newOption.trim(), newCategory.trim() || 'разное');
       setNewOption('');
     }
   };
 
-  const handleSpin = () => {
-    if (options.length < 2 || isSpinning) return;
+  const handleSpinClick = async () => {
+    if (options.length < 2 || isSpinning || currentUser.energy < 5) return;
+    
+    await onSpin();
     setIsSpinning(true);
 
     const spinDuration = 5000;
@@ -128,17 +131,17 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
           />
           <button
             onClick={handleAdd}
-            className="w-full bg-tg-button text-tg-button-text font-bold py-3 rounded-lg hover:bg-blue-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:scale-100"
-            disabled={!newOption.trim()}
+            className="w-full bg-tg-button text-tg-button-text font-bold py-3 rounded-lg hover:bg-blue-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
+            disabled={!newOption.trim() || currentUser.energy < 1}
           >
-            Добавить
+            Добавить (-1⚡️)
           </button>
         </div>
       </div>
 
       <div>
         <h2 className="text-xl font-bold mb-3">Варианты</h2>
-         <div className="h-64 bg-tg-secondary-bg rounded-xl relative overflow-hidden p-2 shadow-inner">
+         <div className="h-64 bg-tg-secondary-bg rounded-xl relative p-2 shadow-inner overflow-y-auto">
              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-16 bg-tg-link/20 border-y-2 border-tg-link rounded-lg z-10 pointer-events-none"></div>
              <div ref={listRef} className="will-change-transform">
                 {(isSpinning ? repeatedOptions : options).map((option, index) => {
@@ -167,11 +170,11 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
       </div>
       
       <button
-        onClick={handleSpin}
-        disabled={isSpinning || options.length < 2}
+        onClick={handleSpinClick}
+        disabled={isSpinning || options.length < 2 || currentUser.energy < 5}
         className="w-full bg-green-500 text-white font-bold text-lg py-4 rounded-xl hover:bg-green-600 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
       >
-        {isSpinning ? 'Крутится...' : 'Запустить рулетку'}
+        {isSpinning ? 'Крутится...' : `Запустить рулетку (-5⚡️)`}
       </button>
     </div>
   );
