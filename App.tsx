@@ -389,6 +389,12 @@ const App: React.FC = () => {
   
   const handleMakeChessMove = useCallback(async (move: { from: string, to: string, promotion?: string }) => {
     if (!activeChessGame || !currentUser) return;
+
+    if (typeof window.Chess === 'undefined') {
+      console.error("Chess.js library not loaded, cannot make a move.");
+      alert("Ошибка: Шахматный движок не загружен. Попробуйте обновить страницу.");
+      return;
+    }
     
     const game = new window.Chess(activeChessGame.fen);
     if (game.turn() !== (activeChessGame.player_white === currentUser.id ? 'w' : 'b')) return;

@@ -1,89 +1,96 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, ChessGame, ChessGameStatus } from '../types';
 
-declare var Chess: any;
-
 const PIECE_UNICODE: { [key: string]: string } = {
-  p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔',
-  P: '♟', N: '♞', B: '♝', R: '♜', Q: '♛', K: '♚',
+  p: '♙', n: '♘', b: '♗', r: '♖', q: '♕', k: '♔', // White
+  P: '♟', N: '♞', B: '♝', R: '♜', Q: '♛', K: '♚', // Black
 };
 
 const Chessboard: React.FC<{
-  fen: string;
+  chess: any; // Instance of Chess.js game
   onMove: (move: { from: string, to: string, promotion?: string }) => void;
   isMyTurn: boolean;
   playerColor: 'w' | 'b';
-}> = ({ fen, onMove, isMyTurn, playerColor }) => {
+}> = ({ chess, onMove, isMyTurn, playerColor }) => {
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [validMoves, setValidMoves] = useState<string[]>([]);
-  const chess = useMemo(() => new Chess(fen), [fen]);
 
   const board = useMemo(() => chess.board(), [chess]);
   const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
   const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
-
-  const boardSquares = playerColor === 'w' ? ranks.map(rank => files.map(file => ({ file, rank }))) : ranks.reverse().map(rank => files.reverse().map(file => ({ file, rank })));
+  
+  // Flip board for black player
+  const boardRanks = playerColor === 'w' ? ranks : [...ranks].reverse();
+  const boardFiles = playerColor === 'w' ? files : [...files].reverse();
 
   const handleSquareClick = (square: string) => {
-    if (!isMyTurn) return;
+    if (!isMyTurn || !chess) return;
 
+    const pieceOnTarget = chess.get(square);
+
+    // If a piece is already selected
     if (selectedSquare) {
-      const move = { from: selectedSquare, to: square, promotion: 'q' };
-      const isValid = chess.move(move);
-      chess.undo(); 
-      if (isValid) {
+      const isMoveValid = validMoves.includes(square);
+      if (isMoveValid) {
+        // It's a valid move, let's make it
+        const move = { from: selectedSquare, to: square, promotion: 'q' }; // Default promotion to Queen
         onMove(move);
         setSelectedSquare(null);
         setValidMoves([]);
-      } else {
-        setSelectedSquare(null);
-        setValidMoves([]);
-        const piece = chess.get(square);
-        if (piece && piece.color === playerColor) {
-           setSelectedSquare(square);
-           setValidMoves(chess.moves({ square, verbose: true }).map((m: any) => m.to));
-        }
+        return;
       }
+    }
+    
+    // If the target square has one of my pieces, select it.
+    // This works for deselecting the current piece or selecting a different one.
+    if (pieceOnTarget && pieceOnTarget.color === playerColor) {
+      setSelectedSquare(square);
+      setValidMoves(chess.moves({ square, verbose: true }).map((m: any) => m.to));
     } else {
-      const piece = chess.get(square);
-      if (piece && piece.color === playerColor) {
-        setSelectedSquare(square);
-        setValidMoves(chess.moves({ square, verbose: true }).map((m: any) => m.to));
-      }
+      // Otherwise, deselect.
+      setSelectedSquare(null);
+      setValidMoves([]);
     }
   };
 
   return (
     <div className="aspect-square w-full grid grid-cols-8 bg-gray-500 rounded-md overflow-hidden shadow-lg">
-      {boardSquares.flat().map(({ file, rank }, index) => {
-        const squareId = `${file}${rank}`;
-        const piece = board[8 - parseInt(rank)][files.indexOf(file)];
-        const isLight = (files.indexOf(file) + parseInt(rank)) % 2 === 1;
-        const isSelected = selectedSquare === squareId;
-        const isPossibleMove = validMoves.includes(squareId);
+      {boardRanks.map((rank) =>
+        boardFiles.map((file) => {
+          const squareId = `${file}${rank}`;
+          const piece = chess.get(squareId);
+          const isLight = (files.indexOf(file) + parseInt(rank)) % 2 !== 0;
+          const isSelected = selectedSquare === squareId;
+          const isPossibleMove = validMoves.includes(squareId);
+          
+          let pieceUnicodeChar = '';
+          if (piece) {
+            const pieceKey = piece.color === 'b' ? piece.type.toUpperCase() : piece.type;
+            pieceUnicodeChar = PIECE_UNICODE[pieceKey] || '';
+          }
 
-        return (
-          <div
-            key={squareId}
-            onClick={() => handleSquareClick(squareId)}
-            className={`flex items-center justify-center cursor-pointer relative ${
-              isLight ? 'bg-gray-300' : 'bg-gray-600'
-            }`}
-          >
-            {isPossibleMove && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-1/3 h-1/3 bg-green-500/50 rounded-full" />
-              </div>
-            )}
-             {isSelected && (
-              <div className="absolute inset-0 bg-yellow-400/50" />
-            )}
-            <span className={`text-4xl sm:text-5xl transition-transform duration-100 ${piece?.color === 'b' ? 'text-black' : 'text-white'}`}>
-              {piece ? PIECE_UNICODE[piece.type.toUpperCase()] : ''}
-            </span>
-          </div>
-        );
-      })}
+          return (
+            <div
+              key={squareId}
+              onClick={() => handleSquareClick(squareId)}
+              className={`flex items-center justify-center cursor-pointer relative ${
+                isLight ? 'bg-gray-300' : 'bg-gray-600'
+              }`}
+            >
+              {isPossibleMove && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="w-1/3 h-1/3 bg-green-500/50 rounded-full" />
+                </div>
+              )}
+              {isSelected && (
+                <div className="absolute inset-0 bg-yellow-400/50" />
+              )}
+              <span className={`text-4xl sm:text-5xl transition-transform duration-100 ${piece?.color === 'b' ? 'text-black' : 'text-white'}`}>
+                {pieceUnicodeChar}
+              </span>
+            </div>
+          );
+      }))}
     </div>
   );
 };
@@ -105,22 +112,58 @@ const ChessView: React.FC<{
   onMove: (move: { from: string, to: string, promotion?: string }) => void;
   onClose: () => void;
 }> = ({ currentUser, game, users, onMove, onClose }) => {
-  const chess = useMemo(() => new Chess(game.fen), [game.fen]);
+  const [isEngineReady, setIsEngineReady] = useState(typeof window.Chess !== 'undefined');
+
+  useEffect(() => {
+    if (isEngineReady) return;
+    const timeoutId = setTimeout(() => {
+        if (!isEngineReady) console.error("Chess.js engine failed to load in 10 seconds.");
+    }, 10000);
+    const intervalId = setInterval(() => {
+        if (typeof window.Chess !== 'undefined') {
+            setIsEngineReady(true);
+            clearInterval(intervalId);
+            clearTimeout(timeoutId);
+        }
+    }, 100);
+    return () => {
+        clearInterval(intervalId);
+        clearTimeout(timeoutId);
+    };
+  }, [isEngineReady]);
+
+  const chess = useMemo(() => {
+    if (!isEngineReady) return null;
+    try {
+      return new window.Chess(game.fen);
+    } catch (e) {
+      console.error("Invalid FEN provided to Chess.js:", game.fen, e);
+      return null;
+    }
+  }, [game.fen, isEngineReady]);
 
   const opponent = useMemo(() => {
     const opponentId = game.player_white === currentUser.id ? game.player_black : game.player_white;
     return users.find(u => u.id === opponentId);
   }, [game, currentUser, users]);
-
+  
   const playerColor = game.player_white === currentUser.id ? 'w' : 'b';
-  const isMyTurn = chess.turn() === playerColor;
+  const isMyTurn = chess ? chess.turn() === playerColor : false;
   
   const statusText = useMemo(() => {
+    if (!chess) return "Загрузка движка...";
     if (game.status === ChessGameStatus.PENDING) return "Ожидание соперника...";
     if (game.status === ChessGameStatus.COMPLETED) {
         if (!game.winner) return "Ничья!";
         return game.winner === currentUser.id ? "Вы победили!" : "Вы проиграли";
     }
+
+    if (chess.isCheckmate()) return "Мат!";
+    if (chess.isStalemate()) return "Пат! Ничья.";
+    if (chess.isThreefoldRepetition()) return "Ничья (троекратное повторение).";
+    if (chess.isInsufficientMaterial()) return "Ничья (недостаточно фигур).";
+    if (chess.isDraw() && !chess.isCheck()) return "Ничья.";
+    
     if (chess.isCheck()) return "Шах!";
     return isMyTurn ? "Ваш ход" : `Ход @${opponent?.username}`;
   }, [game, currentUser, opponent, isMyTurn, chess]);
@@ -137,7 +180,18 @@ const ChessView: React.FC<{
   if (!opponent) {
     return <div className="text-center p-4">Загрузка данных об оппоненте...</div>;
   }
-  
+
+  if (!isEngineReady || !chess) {
+    return (
+        <div className="animate-fade-in p-4 bg-tg-secondary-bg rounded-2xl shadow-2xl space-y-4 text-center">
+            <h3 className="text-xl font-bold">{!isEngineReady ? "Загрузка..." : "Ошибка"}</h3>
+            <p className="text-tg-hint">
+              {!isEngineReady ? "Загружаем шахматный движок..." : "Не удалось обработать состояние игры. Попробуйте обновить страницу."}
+            </p>
+        </div>
+    );
+  }
+
   if (game.status === ChessGameStatus.PENDING && game.player_black === currentUser.id) {
     return (
        <div className="animate-fade-in text-center p-4 bg-tg-secondary-bg rounded-2xl shadow-2xl">
@@ -152,7 +206,8 @@ const ChessView: React.FC<{
     <div className="animate-fade-in p-4 bg-tg-secondary-bg rounded-2xl shadow-2xl space-y-4">
         <PlayerCard user={opponent} isTurn={!isMyTurn} />
 
-        <Chessboard fen={game.fen} onMove={onMove} isMyTurn={isMyTurn} playerColor={playerColor} />
+        {/* FIX: Removed extraneous `fen` prop that was causing a type error. The `chess` object is sufficient. */}
+        <Chessboard chess={chess} onMove={onMove} isMyTurn={isMyTurn} playerColor={playerColor} />
 
         <PlayerCard user={currentUser} isTurn={isMyTurn} />
 
