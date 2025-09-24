@@ -84,6 +84,7 @@ const App: React.FC = () => {
   const [pendingDuels, setPendingDuels] = useState<Duel[]>([]);
   const [activeChessGame, setActiveChessGame] = useState<ChessGame | null>(null);
   const [pendingChessGames, setPendingChessGames] = useState<ChessGame[]>([]);
+  const [ongoingChessGames, setOngoingChessGames] = useState<ChessGame[]>([]);
 
 
   // Инициализация Telegram и определение пользователя
@@ -209,7 +210,7 @@ const App: React.FC = () => {
         // This helps to prevent "Missing or invalid client id" errors on connection loss or server restart.
         pb.realtime.unsubscribe();
         try {
-            const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes] = await Promise.all([
+            const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes, ongoingChessGamesRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
                 pb.collection('options').getFullList<Option>({ requestKey: null }),
                 pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
@@ -218,6 +219,7 @@ const App: React.FC = () => {
                 pb.collection('duels').getFullList<Duel>({ filter: `opponent = "${currentUser.id}" && status = "pending"`, sort: '-created', requestKey: null, expand: 'challenger,opponent' }),
                 pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "completed"`, sort: '-created', requestKey: null, expand: 'player_white,player_black,winner' }),
                 pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "pending"`, requestKey: null, expand: 'player_white,player_black' }),
+                pb.collection('chess_games').getFullList<ChessGame>({ filter: `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "ongoing"`, requestKey: null, expand: 'player_white,player_black' })
             ]);
 
             setUsers(usersRes.sort((a, b) => b.stats_wins - a.stats_wins));
@@ -228,6 +230,7 @@ const App: React.FC = () => {
             setPendingDuels(pendingDuelsRes);
             setChessHistory(chessHistoryRes);
             setPendingChessGames(pendingChessGamesRes.filter(g => g.player_black === currentUser.id)); // Only opponent gets pending games
+            setOngoingChessGames(ongoingChessGamesRes);
 
             try {
                 const purchasesRes = await pb.collection('purchases').getFullList<Purchase>({ filter: `user = "${currentUser.id}"`, sort: '-created', requestKey: null });
@@ -249,23 +252,11 @@ const App: React.FC = () => {
             } catch (error: any) {
                 if (error.status !== 404) console.error("Error checking for active duel:", error);
             }
-            
-            // Check for an ongoing chess game to rejoin
-            try {
-                const activeChessFilter = `(player_white = "${currentUser.id}" || player_black = "${currentUser.id}") && status = "${ChessGameStatus.ONGOING}"`;
-                const ongoingChessGame = await pb.collection('chess_games').getFirstListItem<ChessGame>(activeChessFilter, { requestKey: null, expand: 'player_white,player_black' });
-                if (ongoingChessGame) {
-                    setActiveChessGame(ongoingChessGame);
-                    setView(AppView.CHESS);
-                }
-            } catch (error: any) {
-                if (error.status !== 404) console.error("Error checking for active chess game:", error);
-            }
 
         } catch (err: any) {
             console.error("Error fetching initial data:", err);
             setDataErrors(prev => [...prev, getPocketbaseError(err, "Не удалось загрузить основные данные.")]);
-            setUsers([]); setOptions([]); setWinHistory([]); setRewards([]); setPurchases([]); setDuelHistory([]); setPendingDuels([]); setChessHistory([]); setPendingChessGames([]);
+            setUsers([]); setOptions([]); setWinHistory([]); setRewards([]); setPurchases([]); setDuelHistory([]); setPendingDuels([]); setChessHistory([]); setPendingChessGames([]); setOngoingChessGames([]);
         }
 
       const subscribeToCollection = async (collectionName: string, callback: (data: RecordSubscription) => void) => {
@@ -329,7 +320,19 @@ const App: React.FC = () => {
               .then(newGame => setPendingChessGames(prev => [newGame, ...prev]))
               .catch(err => console.error("Failed to fetch new pending chess game:", err));
         } else if (e.action === 'update') {
+            if (record.status === ChessGameStatus.ONGOING) {
+                pb.collection('chess_games').getOne<ChessGame>(record.id, { expand: 'player_white,player_black' })
+                    .then(game => setOngoingChessGames(prev => {
+                        const exists = prev.some(g => g.id === game.id);
+                        return exists ? prev.map(g => (g.id === game.id ? game : g)) : [...prev, game];
+                    }))
+                    .catch(err => console.error("Failed to update ongoing games list:", err));
+            } else {
+                setOngoingChessGames(prev => prev.filter(g => g.id !== record.id));
+            }
+
             if (record.status !== ChessGameStatus.PENDING) setPendingChessGames(prev => prev.filter(g => g.id !== record.id));
+            
             if (activeChessGame?.id === record.id) {
                  pb.collection('chess_games').getOne<ChessGame>(record.id, { expand: 'player_white,player_black' })
                     .then(setActiveChessGame)
@@ -347,6 +350,7 @@ const App: React.FC = () => {
             }
         } else if (e.action === 'delete') {
             setPendingChessGames(prev => prev.filter(g => g.id !== record.id));
+            setOngoingChessGames(prev => prev.filter(g => g.id !== record.id));
              if (activeChessGame?.id === record.id) {
                 setActiveChessGame(null);
                 setView(AppView.PROFILES);
@@ -431,48 +435,79 @@ const App: React.FC = () => {
   const handleMakeChessMove = useCallback(async (move: { from: string, to: string, promotion?: string }) => {
     if (!activeChessGame || !currentUser) return;
 
+    // Ensure the chess engine is loaded
     if (typeof window.Chess === 'undefined') {
       console.error("Chess.js library not loaded, cannot make a move.");
       alert("Ошибка: Шахматный движок не загружен. Попробуйте обновить страницу.");
       return;
     }
     
+    // Create a game instance from the current FEN to validate the move
     const game = new window.Chess(activeChessGame.fen);
-    if (game.turn() !== (activeChessGame.player_white === currentUser.id ? 'w' : 'b')) return;
-
-    const result = game.move(move);
-    if (result === null) {
-        console.warn("Invalid move attempted:", move);
-        return;
+    
+    // 1. Validate the move
+    // Check if it's the current player's turn
+    if (game.turn() !== (activeChessGame.player_white === currentUser.id ? 'w' : 'b')) {
+      console.warn("Not your turn!");
+      return;
     }
 
-    const updatePayload: Partial<ChessGame> = {
+    // Attempt to make the move
+    const result = game.move(move);
+    if (result === null) {
+      console.warn("Invalid move attempted:", move);
+      return; // The move was illegal, so we stop here.
+    }
+
+    // 2. Prepare the database update payload with the new game state
+    const updatePayload: Partial<ChessGame> & {[key:string]: any} = {
         fen: game.fen(),
         turn: game.turn(),
         pgn: game.pgn()
     };
     
+    // 3. Implement game-over detection
     if (game.isGameOver()) {
         updatePayload.status = ChessGameStatus.COMPLETED;
         let winnerId: string | undefined = undefined;
+        
+        // Check for checkmate to determine the winner
         if (game.isCheckmate()) {
+            // The winner is the player whose turn it WAS, not whose turn it IS now.
             winnerId = game.turn() === 'b' ? activeChessGame.player_white : activeChessGame.player_black;
-        } // Otherwise it's a draw, winner remains undefined
+        } // Otherwise it's a draw (stalemate, etc.), so winner remains undefined
+        
         updatePayload.winner = winnerId;
         
+        // 4. Award points to the winner and deduct from the loser
         if (winnerId) {
             const loserId = winnerId === activeChessGame.player_white ? activeChessGame.player_black : activeChessGame.player_white;
              try {
-                await pb.collection('users').update(winnerId, { 'points+': CHESS_COST });
-                await pb.collection('users').update(loserId, { 'points-': CHESS_COST });
-            } catch (e) { console.error("CRITICAL: Failed to update points after chess game.", e); }
+                // Update points for both players in parallel for efficiency
+                await Promise.all([
+                    pb.collection('users').update(winnerId, { 'points+': CHESS_COST }),
+                    pb.collection('users').update(loserId, { 'points-': CHESS_COST })
+                ]);
+            } catch (e) { 
+                console.error("CRITICAL: Failed to update points after chess game. Points may be inconsistent.", e);
+            }
         }
     }
 
+    // 5. Persist the updated game state to the database
     try {
         await pb.collection('chess_games').update<ChessGame>(activeChessGame.id, updatePayload);
-    } catch (error) { console.error("Failed to make chess move:", error); }
+    } catch (error) { 
+        console.error("Failed to make chess move and update game state:", error); 
+        // Optional: Revert local game state if DB update fails to maintain consistency
+        // For now, we rely on the real-time subscription to correct the state.
+    }
   }, [activeChessGame, currentUser]);
+
+  const handleJoinChessGame = useCallback((game: ChessGame) => {
+    setActiveChessGame(game);
+    setView(AppView.CHESS);
+  }, []);
 
   const handleCloseChessGame = useCallback(() => {
     setActiveChessGame(null);
@@ -505,11 +540,13 @@ const App: React.FC = () => {
               chessHistory={chessHistory}
               pendingDuels={pendingDuels}
               pendingChessGames={pendingChessGames}
+              ongoingChessGames={ongoingChessGames}
               currentUser={currentUser} 
               onAcceptDuel={handleAcceptDuel}
               onDeclineDuel={handleDeclineDuel}
               onAcceptChess={handleAcceptChess}
               onDeclineChess={handleDeclineChess}
+              onJoinChessGame={handleJoinChessGame}
             />
           )}
           {view === AppView.DUEL && activeDuel && (

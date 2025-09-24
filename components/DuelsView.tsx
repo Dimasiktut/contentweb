@@ -7,11 +7,13 @@ interface GamesViewProps {
   chessHistory: ChessGame[];
   pendingDuels: Duel[];
   pendingChessGames: ChessGame[];
+  ongoingChessGames: ChessGame[];
   currentUser: User;
   onAcceptDuel: (duel: Duel) => void;
   onDeclineDuel: (duelId: string) => void;
   onAcceptChess: (game: ChessGame) => void;
   onDeclineChess: (gameId: string) => void;
+  onJoinChessGame: (game: ChessGame) => void;
 }
 
 const DuelInvitationCard: React.FC<{
@@ -82,6 +84,39 @@ const ChessInvitationCard: React.FC<{
   </div>
 );
 
+const OngoingChessCard: React.FC<{
+  game: ChessGame,
+  currentUser: User,
+  onJoin: () => void
+}> = ({ game, currentUser, onJoin }) => {
+  const opponent = game.player_white === currentUser.id ? game.expand?.player_black : game.expand?.player_white;
+  if (!opponent) return null;
+
+  const isMyTurn = (game.turn === 'w' && game.player_white === currentUser.id) || (game.turn === 'b' && game.player_black === currentUser.id);
+
+  return (
+    <div className="bg-tg-secondary-bg p-4 rounded-xl shadow-md animate-slide-in-up">
+      <div className="flex items-center gap-3">
+        <img src={opponent.avatarUrl} alt={opponent.username} className="w-12 h-12 rounded-full" />
+        <div>
+          <p className="font-bold text-tg-text">Партия с @{opponent.username}</p>
+          <p className={`text-sm font-bold ${isMyTurn ? 'text-green-400 animate-pulse' : 'text-tg-hint'}`}>
+            {isMyTurn ? 'Ваш ход' : 'Ход соперника'}
+          </p>
+        </div>
+        <div className="ml-auto">
+          <button
+            onClick={onJoin}
+            className="bg-blue-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-700 transition"
+          >
+            Войти
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ChessHistoryItem: React.FC<{ game: ChessGame; currentUser: User; }> = ({ game, currentUser }) => {
     const isWhite = game.player_white === currentUser.id;
     const opponent = isWhite ? game.expand?.player_black : game.expand?.player_white;
@@ -119,16 +154,18 @@ const ChessHistoryItem: React.FC<{ game: ChessGame; currentUser: User; }> = ({ g
     );
 };
 
-const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendingDuels, pendingChessGames, currentUser, onAcceptDuel, onDeclineDuel, onAcceptChess, onDeclineChess }) => {
+const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendingDuels, pendingChessGames, ongoingChessGames, currentUser, onAcceptDuel, onDeclineDuel, onAcceptChess, onDeclineChess, onJoinChessGame }) => {
   const sortedPendingDuels = [...pendingDuels].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
   const sortedPendingChess = [...pendingChessGames].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+  const sortedOngoingChess = [...ongoingChessGames].sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
 
   const combinedHistory = [...duelHistory, ...chessHistory].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 
+  const hasOngoing = sortedOngoingChess.length > 0;
   const hasPending = sortedPendingDuels.length > 0 || sortedPendingChess.length > 0;
   const hasHistory = combinedHistory.length > 0;
 
-  if (!hasPending && !hasHistory) {
+  if (!hasPending && !hasHistory && !hasOngoing) {
     return (
       <div className="text-center py-10 px-4 animate-fade-in">
         <p className="text-5xl mb-4">⚔️</p>
@@ -140,6 +177,22 @@ const GamesView: React.FC<GamesViewProps> = ({ duelHistory, chessHistory, pendin
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {hasOngoing && (
+        <div>
+          <h2 className="text-xl font-bold mb-3 text-tg-text">Активные игры</h2>
+          <div className="space-y-3">
+            {sortedOngoingChess.map(game => (
+              <OngoingChessCard
+                key={game.id}
+                game={game}
+                currentUser={currentUser}
+                onJoin={() => onJoinChessGame(game)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      
       {hasPending && (
         <div>
           <h2 className="text-xl font-bold mb-3 text-tg-text">Входящие вызовы</h2>
