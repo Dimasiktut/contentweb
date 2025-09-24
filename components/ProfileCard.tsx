@@ -71,7 +71,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
         <div className="mt-5">
           <button
             onClick={() => onInitiateDuel(user)}
-            disabled={(currentUser.points || 0) < DUEL_COST}
+            disabled={(currentUser.points || 0) < DUEL_COST || (user.points || 0) < DUEL_COST}
             className="w-full bg-red-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-red-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
           >
             Дуэль (-{DUEL_COST} 🪙)
