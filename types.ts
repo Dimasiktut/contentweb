@@ -57,6 +57,7 @@ export enum AppView {
   REWARDS = 'REWARDS',
   DUEL = 'DUEL',
   DUELS_VIEW = 'DUELS_VIEW',
+  GUIDE = 'GUIDE',
 }
 
 // Награды в магазине

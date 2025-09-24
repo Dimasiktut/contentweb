@@ -8,6 +8,7 @@ import HistoryView from './components/HistoryView';
 import RewardsView from './components/RewardsView';
 import DuelView from './components/DuelView';
 import DuelsView from './components/DuelsView';
+import GuideView from './components/GuideView';
 import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice } from './types';
 import { pb } from './pocketbase';
 
@@ -199,7 +200,7 @@ const App: React.FC = () => {
                 }),
                 pb.collection('duels').getFullList<Duel>({
                     filter: `opponent = "${currentUser.id}" && status = "pending"`,
-                    sort: 'created',
+                    sort: '-created',
                     requestKey: null
                 })
             ]);
@@ -287,7 +288,7 @@ const App: React.FC = () => {
         
         // Handle incoming duel invitations
         if (e.action === 'create' && record.status === DuelStatus.PENDING && record.opponent === currentUser.id) {
-            setPendingDuels(prev => [...prev, record]);
+            setPendingDuels(prev => [record, ...prev]);
         } 
         // Handle updates to any duel I am part of
         else if (e.action === 'update' && (record.challenger === currentUser.id || record.opponent === currentUser.id)) {
@@ -297,9 +298,12 @@ const App: React.FC = () => {
             }
 
             // Update active duel if it's the one being changed
-            if (activeDuel && activeDuel.id === record.id) {
-                setActiveDuel(record);
-            }
+            setActiveDuel(currentActiveDuel => {
+                if (currentActiveDuel && currentActiveDuel.id === record.id) {
+                    return record;
+                }
+                return currentActiveDuel;
+            });
 
             // Add to history if it's now completed/finished
             if ([DuelStatus.COMPLETED, DuelStatus.DECLINED, DuelStatus.CANCELLED, DuelStatus.EXPIRED].includes(record.status)) {
@@ -309,11 +313,14 @@ const App: React.FC = () => {
         // Handle deletion of a duel I am part of
         else if (e.action === 'delete' && (record.challenger === currentUser.id || record.opponent === currentUser.id)) {
             setPendingDuels(prev => prev.filter(d => d.id !== record.id));
-            if (activeDuel && activeDuel.id === record.id) {
-                setActiveDuel(null);
-                setView(AppView.PROFILES);
-                alert("Дуэль была отменена администратором.");
-            }
+            setActiveDuel(currentActiveDuel => {
+                if (currentActiveDuel && currentActiveDuel.id === record.id) {
+                    setView(AppView.PROFILES);
+                    alert("Дуэль была отменена администратором.");
+                    return null;
+                }
+                return currentActiveDuel;
+            });
         }
       });
     }
@@ -323,7 +330,7 @@ const App: React.FC = () => {
     return () => {
         unsubscribers.forEach(unsub => unsub());
     };
-}, [currentUser, activeDuel]);
+}, [currentUser]);
 
   const handleAddOption = useCallback(async (text: string, category: string) => {
     if (!currentUser || currentUser.energy < 1) return;
@@ -633,6 +640,7 @@ const App: React.FC = () => {
                 onCancel={handleCancelDuel}
             />
           )}
+          {view === AppView.GUIDE && <GuideView />}
         </main>
       </div>
     </div>

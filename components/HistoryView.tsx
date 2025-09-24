@@ -8,7 +8,9 @@ interface HistoryViewProps {
 }
 
 const HistoryView: React.FC<HistoryViewProps> = ({ history, users }) => {
-  if (history.length === 0) {
+  const sortedHistory = [...history].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+
+  if (sortedHistory.length === 0) {
     return (
       <div className="text-center py-10 px-4 animate-fade-in">
         <p className="text-5xl mb-4">📜</p>
@@ -22,7 +24,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, users }) => {
 
   return (
     <div className="space-y-3 animate-fade-in">
-      {history.map(record => {
+      {sortedHistory.map(record => {
         const author = users.find(u => u.id === record.author);
         if (!author) return null;
         return <HistoryItem key={record.id} record={record} author={author} />;

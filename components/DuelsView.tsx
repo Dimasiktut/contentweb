@@ -47,8 +47,11 @@ const DuelInvitationCard: React.FC<{
 
 
 const DuelsView: React.FC<DuelsViewProps> = ({ history, pendingDuels, users, currentUser, onAcceptDuel, onDeclineDuel }) => {
+  // Sort both lists to ensure newest items are always first
+  const sortedPendingDuels = [...pendingDuels].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+  const sortedHistory = [...history].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
 
-  if (history.length === 0 && pendingDuels.length === 0) {
+  if (sortedHistory.length === 0 && sortedPendingDuels.length === 0) {
     return (
       <div className="text-center py-10 px-4 animate-fade-in">
         <p className="text-5xl mb-4">⚔️</p>
@@ -62,11 +65,11 @@ const DuelsView: React.FC<DuelsViewProps> = ({ history, pendingDuels, users, cur
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {pendingDuels.length > 0 && (
+      {sortedPendingDuels.length > 0 && (
         <div>
           <h2 className="text-xl font-bold mb-3 text-tg-text">Входящие вызовы</h2>
           <div className="space-y-3">
-            {pendingDuels.map(duel => {
+            {sortedPendingDuels.map(duel => {
               const challenger = users.find(u => u.id === duel.challenger);
               if (!challenger) return null;
               return (
@@ -83,11 +86,11 @@ const DuelsView: React.FC<DuelsViewProps> = ({ history, pendingDuels, users, cur
         </div>
       )}
 
-      {history.length > 0 && (
+      {sortedHistory.length > 0 && (
          <div>
           <h2 className="text-xl font-bold mb-3 text-tg-text">История дуэлей</h2>
           <div className="space-y-3">
-            {history.map(duel => (
+            {sortedHistory.map(duel => (
               <DuelHistoryItem key={duel.id} duel={duel} users={users} currentUser={currentUser} />
             ))}
           </div>
