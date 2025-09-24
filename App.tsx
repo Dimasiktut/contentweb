@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
@@ -27,7 +28,7 @@ const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
-  const [dataError, setDataError] = useState<string | null>(null);
+  const [dataErrors, setDataErrors] = useState<string[]>([]);
 
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
@@ -56,10 +57,12 @@ const App: React.FC = () => {
             setCurrentUser(user);
           }
         } else {
-          // User not found, create a new one, letting PocketBase generate the ID
+          // User not found, create one with robust retry logic for username
+          let username = (tgUser.username || `user_${tgUser.id}`).toLowerCase().replace(/ /g, '_');
+          
           const newUserPayload = {
             tg_id: tgUser.id,
-            username: tgUser.username || `${tgUser.first_name || 'user'}_${tgUser.last_name || ''}_${tgUser.id}`.toLowerCase().replace(/ /g, '_'),
+            username: username,
             avatarUrl: tgUser.photo_url || `https://picsum.photos/seed/${tgUser.id}/100/100`,
             role: 'Участник',
             stats_ideasProposed: 0,
@@ -67,12 +70,28 @@ const App: React.FC = () => {
             stats_winStreak: 0,
             achievements: [],
           };
-          const createdUser = await pb.collection('users').create<User>(newUserPayload);
-          setCurrentUser(createdUser);
+
+          try {
+            const createdUser = await pb.collection('users').create<User>(newUserPayload);
+            setCurrentUser(createdUser);
+          } catch (creationError: any) {
+            // Handle potential username collision on creation
+            const isUsernameError = creationError.originalError?.data?.data?.username?.code === 'validation_not_unique';
+            if (isUsernameError) {
+              console.warn(`Username ${username} is taken. Retrying with a more unique name.`);
+              // Append tg_id to make it unique and retry
+              newUserPayload.username = `${username}_${tgUser.id}`;
+              const createdUserWithSuffix = await pb.collection('users').create<User>(newUserPayload);
+              setCurrentUser(createdUserWithSuffix);
+            } else {
+              // Re-throw other creation errors to be caught by the outer block
+              throw creationError;
+            }
+          }
         }
       } catch (error: any) {
         console.error("Critical error during user initialization:", error);
-        const pbError = error.data?.message || error.message || "Произошла неизвестная ошибка.";
+        const pbError = error.originalError?.data?.message || error.message || "Произошла неизвестная ошибка.";
         setInitError(`Не удалось создать или загрузить профиль. (${pbError})`);
       } finally {
         setIsLoading(false);
@@ -98,18 +117,46 @@ const App: React.FC = () => {
 
   // Real-time listeners for data from PocketBase
   useEffect(() => {
-    // Initial fetch
-    pb.collection('users').getFullList<User>().then(setUsers).catch(err => console.error("Failed to fetch users", err));
-    
-    pb.collection('options').getFullList<Option>().then(setOptions).catch(err => {
-      console.error("Failed to fetch options", err);
-      setDataError("Не удалось загрузить варианты. Проверьте права доступа к коллекции 'options' в PocketBase.");
-    });
-      
-    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory).catch(err => {
-      console.error("Failed to fetch history", err);
-      setDataError("Не удалось загрузить историю. Проверьте права доступа к коллекции 'history' в PocketBase.");
-    });
+    if (!currentUser) return; // Don't fetch data until user is initialized
+
+    const fetchData = async () => {
+        const results = await Promise.allSettled([
+            pb.collection('users').getFullList<User>(),
+            pb.collection('options').getFullList<Option>(),
+            pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' })
+        ]);
+
+        const newErrors: string[] = [];
+
+        // Users
+        if (results[0].status === 'fulfilled') {
+            setUsers(results[0].value);
+        } else {
+            console.error("Failed to fetch users", results[0].reason);
+        }
+
+        // Options
+        if (results[1].status === 'fulfilled') {
+            setOptions(results[1].value);
+        } else {
+            console.error("Failed to fetch options", results[1].reason);
+            newErrors.push("Не удалось загрузить варианты. Проверьте права доступа к коллекции 'options' в PocketBase.");
+        }
+
+        // History
+        if (results[2].status === 'fulfilled') {
+            setWinHistory(results[2].value);
+        } else {
+            console.error("Failed to fetch history", results[2].reason);
+            newErrors.push("Не удалось загрузить историю. Проверьте права доступа к коллекции 'history' в PocketBase.");
+        }
+
+        if (newErrors.length > 0) {
+            setDataErrors(newErrors);
+        }
+    };
+
+    fetchData();
 
     // Subscriptions
     const unsubscribers: (() => void)[] = [];
@@ -146,7 +193,7 @@ const App: React.FC = () => {
     return () => {
         unsubscribers.forEach(unsub => unsub());
     };
-}, []);
+}, [currentUser]);
 
 
   const handleAddOption = useCallback(async (text: string, category: string) => {
@@ -230,10 +277,12 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-tg-bg font-sans p-4">
       <div className="max-w-md mx-auto">
-        {dataError && (
+        {dataErrors.length > 0 && (
           <div className="bg-red-900/50 border border-red-700 text-red-200 p-3 rounded-xl mb-4 text-sm" role="alert">
             <p className="font-bold mb-1">⚠️ Ошибка данных</p>
-            <p>{dataError}</p>
+            <ul className="list-disc list-inside">
+              {dataErrors.map((error, index) => <li key={index}>{error}</li>)}
+            </ul>
           </div>
         )}
         <Header currentView={view} setView={setView} />
