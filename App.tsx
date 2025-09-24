@@ -7,8 +7,7 @@ import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import RewardsView from './components/RewardsView';
 import DuelView from './components/DuelView';
-import DuelInvitation from './components/DuelInvitation';
-import DuelHistoryView from './components/DuelHistoryView';
+import DuelsView from './components/DuelsView';
 import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice } from './types';
 import { pb } from './pocketbase';
 
@@ -64,7 +63,7 @@ const App: React.FC = () => {
   
   // Real-time duel state
   const [activeDuel, setActiveDuel] = useState<Duel | null>(null);
-  const [duelInvitations, setDuelInvitations] = useState<Duel[]>([]);
+  const [pendingDuels, setPendingDuels] = useState<Duel[]>([]);
 
 
   // Инициализация Telegram и определение пользователя
@@ -188,7 +187,7 @@ const App: React.FC = () => {
     const setupSubscriptions = async () => {
         try {
             // Fetch primary data that should not fail
-            const [usersRes, optionsRes, historyRes, rewardsRes, duelsRes] = await Promise.all([
+            const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
                 pb.collection('options').getFullList<Option>({ requestKey: null }),
                 pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
@@ -196,6 +195,11 @@ const App: React.FC = () => {
                 pb.collection('duels').getFullList<Duel>({
                     filter: `(challenger = "${currentUser.id}" || opponent = "${currentUser.id}") && (status != "pending" && status != "accepted")`,
                     sort: '-created',
+                    requestKey: null
+                }),
+                pb.collection('duels').getFullList<Duel>({
+                    filter: `opponent = "${currentUser.id}" && status = "pending"`,
+                    sort: 'created',
                     requestKey: null
                 })
             ]);
@@ -207,7 +211,8 @@ const App: React.FC = () => {
             setOptions(optionsRes);
             setWinHistory(historyRes);
             setRewards(rewardsRes);
-            setDuelHistory(duelsRes);
+            setDuelHistory(duelHistoryRes);
+            setPendingDuels(pendingDuelsRes);
 
             // Fetch purchases separately as it might fail due to API rules
             try {
@@ -230,6 +235,7 @@ const App: React.FC = () => {
             setRewards([]);
             setPurchases([]);
             setDuelHistory([]);
+            setPendingDuels([]);
         }
 
 
@@ -278,26 +284,31 @@ const App: React.FC = () => {
 
       subscribeToCollection('duels', (e) => {
         const record = e.record as Duel;
-    
-        if (e.action === 'create' && record.status === DuelStatus.PENDING && record.opponent === currentUser?.id) {
-            if((currentUser?.points || 0) >= DUEL_COST) {
-              setDuelInvitations(prev => [...prev.filter(d => d.id !== record.id), record]);
-            } else {
-                console.log("Received duel invitation but can't afford it.");
+        
+        // Handle incoming duel invitations
+        if (e.action === 'create' && record.status === DuelStatus.PENDING && record.opponent === currentUser.id) {
+            setPendingDuels(prev => [...prev, record]);
+        } 
+        // Handle updates to any duel I am part of
+        else if (e.action === 'update' && (record.challenger === currentUser.id || record.opponent === currentUser.id)) {
+            // Remove from pending list if status is no longer pending
+            if (record.status !== DuelStatus.PENDING) {
+                setPendingDuels(prev => prev.filter(d => d.id !== record.id));
             }
-        } else if (e.action === 'update') {
-            setDuelInvitations(prev => prev.filter(d => d.id !== record.id));
+
+            // Update active duel if it's the one being changed
             if (activeDuel && activeDuel.id === record.id) {
                 setActiveDuel(record);
             }
+
+            // Add to history if it's now completed/finished
             if ([DuelStatus.COMPLETED, DuelStatus.DECLINED, DuelStatus.CANCELLED, DuelStatus.EXPIRED].includes(record.status)) {
                 setDuelHistory(prev => [record, ...prev.filter(d => d.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
-                 if (activeDuel && activeDuel.id === record.id) {
-                   // No need to close immediately, DuelView will show result. User will close it manually.
-                }
             }
-        } else if (e.action === 'delete') {
-            setDuelInvitations(prev => prev.filter(d => d.id !== record.id));
+        } 
+        // Handle deletion of a duel I am part of
+        else if (e.action === 'delete' && (record.challenger === currentUser.id || record.opponent === currentUser.id)) {
+            setPendingDuels(prev => prev.filter(d => d.id !== record.id));
             if (activeDuel && activeDuel.id === record.id) {
                 setActiveDuel(null);
                 setView(AppView.PROFILES);
@@ -465,7 +476,6 @@ const App: React.FC = () => {
       const updatedDuel = await pb.collection('duels').update<Duel>(duel.id, {
         status: DuelStatus.ACCEPTED,
       }, { requestKey: null });
-      setDuelInvitations(prev => prev.filter(d => d.id !== duel.id));
       setActiveDuel(updatedDuel);
       setView(AppView.DUEL);
     } catch(error) {
@@ -477,7 +487,6 @@ const App: React.FC = () => {
   const handleDeclineDuel = useCallback(async (duelId: string) => {
     try {
       await pb.collection('duels').update(duelId, { status: DuelStatus.DECLINED }, { requestKey: null });
-      setDuelInvitations(prev => prev.filter(d => d.id !== duelId));
     } catch(error) {
       console.error("Failed to decline duel:", error);
     }
@@ -576,19 +585,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-tg-bg font-sans p-4">
-      {duelInvitations.length > 0 && (
-          <div className="fixed bottom-4 right-4 z-50 space-y-2">
-              {duelInvitations.map(inv => (
-                  <DuelInvitation
-                      key={inv.id}
-                      duel={inv}
-                      users={users}
-                      onAccept={() => handleAcceptDuel(inv)}
-                      onDecline={() => handleDeclineDuel(inv.id)}
-                  />
-              ))}
-          </div>
-      )}
       <div className="max-w-md mx-auto">
         {dataErrors.length > 0 && (
           <div className="bg-red-900/50 border border-red-700 text-red-200 p-3 rounded-xl mb-4 text-sm" role="alert">
@@ -617,7 +613,16 @@ const App: React.FC = () => {
           {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && currentUser && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
-          {view === AppView.DUEL_HISTORY && currentUser && <DuelHistoryView history={duelHistory} users={users} currentUser={currentUser} />}
+          {view === AppView.DUELS_VIEW && currentUser && (
+            <DuelsView 
+              history={duelHistory} 
+              pendingDuels={pendingDuels}
+              users={users} 
+              currentUser={currentUser} 
+              onAcceptDuel={handleAcceptDuel}
+              onDeclineDuel={handleDeclineDuel}
+            />
+          )}
           {view === AppView.DUEL && currentUser && activeDuel && (
             <DuelView
                 currentUser={currentUser}

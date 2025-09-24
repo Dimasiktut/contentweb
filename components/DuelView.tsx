@@ -20,11 +20,12 @@ const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeCho
   const isChallenger = duel.challenger === currentUser.id;
   const opponentUser = users.find(u => u.id === (isChallenger ? duel.opponent : duel.challenger));
   
+  const isCompleted = duel.status === DuelStatus.COMPLETED;
   const myChoice = isChallenger ? duel.challenger_choice : duel.opponent_choice;
   const opponentChoice = isChallenger ? duel.opponent_choice : duel.challenger_choice;
 
   const getPlayerCardClass = (isWinner: boolean) => {
-    if (duel.status !== DuelStatus.COMPLETED || !duel.winner) return 'border-transparent';
+    if (!isCompleted || !duel.winner) return 'border-transparent';
     return isWinner ? 'border-green-500' : 'border-red-500';
   };
   
@@ -129,10 +130,10 @@ const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeCho
 
       <div className="flex justify-around items-center my-6 h-32 bg-tg-bg rounded-xl p-4 overflow-hidden">
         <div className="text-6xl">
-            {myChoice && CHOICES[myChoice] ? CHOICES[myChoice].icon : '❔'}
+            {myChoice ? CHOICES[myChoice].icon : '❔'}
         </div>
         <div className="text-6xl">
-            {opponentChoice && CHOICES[opponentChoice] ? CHOICES[opponentChoice].icon : '❔'}
+            {isCompleted && opponentChoice ? CHOICES[opponentChoice].icon : '❔'}
         </div>
       </div>
       

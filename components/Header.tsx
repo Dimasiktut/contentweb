@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
         <button onClick={() => setView(AppView.PROFILES)} className={getButtonClass(AppView.PROFILES)}>
           Профили
         </button>
-        <button onClick={() => setView(AppView.DUEL_HISTORY)} className={getButtonClass(AppView.DUEL_HISTORY)}>
+        <button onClick={() => setView(AppView.DUELS_VIEW)} className={getButtonClass(AppView.DUELS_VIEW)}>
           Дуэли
         </button>
          <button onClick={() => setView(AppView.REWARDS)} className={getButtonClass(AppView.REWARDS)}>

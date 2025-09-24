@@ -56,7 +56,7 @@ export enum AppView {
   HISTORY = 'HISTORY',
   REWARDS = 'REWARDS',
   DUEL = 'DUEL',
-  DUEL_HISTORY = 'DUEL_HISTORY',
+  DUELS_VIEW = 'DUELS_VIEW',
 }
 
 // Награды в магазине
