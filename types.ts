@@ -28,13 +28,14 @@ export interface User {
 }
 
 export interface Option {
-  id: number;
+  id: string; // Changed from number to string for Firestore compatibility
   text: string;
   category: string;
   authorId: number;
 }
 
 export interface WinRecord {
+  id?: string; // Optional Firestore ID
   option: Option;
   timestamp: number;
 }
