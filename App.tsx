@@ -26,11 +26,14 @@ const App: React.FC = () => {
   const [winHistory, setWinHistory] = useState<WinRecord[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
     const initializeUser = async (tgUser: any) => {
       try {
+        setInitError(null);
         let user: User | null = null;
         try {
           // Find user by their telegram ID instead of the record ID
@@ -56,7 +59,7 @@ const App: React.FC = () => {
           // User not found, create a new one, letting PocketBase generate the ID
           const newUserPayload = {
             tg_id: tgUser.id,
-            username: tgUser.username || `${tgUser.first_name}_${tgUser.last_name || ''}`.toLowerCase(),
+            username: tgUser.username || `${tgUser.first_name || 'user'}_${tgUser.last_name || ''}_${tgUser.id}`.toLowerCase().replace(/ /g, '_'),
             avatarUrl: tgUser.photo_url || `https://picsum.photos/seed/${tgUser.id}/100/100`,
             role: 'Участник',
             stats_ideasProposed: 0,
@@ -67,9 +70,10 @@ const App: React.FC = () => {
           const createdUser = await pb.collection('users').create<User>(newUserPayload);
           setCurrentUser(createdUser);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Critical error during user initialization:", error);
-        // Can't proceed without a user
+        const pbError = error.data?.message || error.message || "Произошла неизвестная ошибка.";
+        setInitError(`Не удалось создать или загрузить профиль. (${pbError})`);
       } finally {
         setIsLoading(false);
       }
@@ -83,7 +87,6 @@ const App: React.FC = () => {
       if (tgUser) {
         initializeUser(tgUser);
       } else {
-        // For development outside Telegram, create a mock user
         console.warn("Telegram user not found. Creating a mock user for development.");
         initializeUser({ id: 123456789, username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
       }
@@ -97,8 +100,16 @@ const App: React.FC = () => {
   useEffect(() => {
     // Initial fetch
     pb.collection('users').getFullList<User>().then(setUsers).catch(err => console.error("Failed to fetch users", err));
-    pb.collection('options').getFullList<Option>().then(setOptions).catch(err => console.error("Failed to fetch options", err));
-    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory).catch(err => console.error("Failed to fetch history", err));
+    
+    pb.collection('options').getFullList<Option>().then(setOptions).catch(err => {
+      console.error("Failed to fetch options", err);
+      setDataError("Не удалось загрузить варианты. Проверьте права доступа к коллекции 'options' в PocketBase.");
+    });
+      
+    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory).catch(err => {
+      console.error("Failed to fetch history", err);
+      setDataError("Не удалось загрузить историю. Проверьте права доступа к коллекции 'history' в PocketBase.");
+    });
 
     // Subscriptions
     const unsubscribers: (() => void)[] = [];
@@ -202,10 +213,15 @@ const App: React.FC = () => {
   if (!currentUser) {
      return (
       <div className="min-h-screen bg-tg-bg flex items-center justify-center">
-        <div className="text-center p-4">
+        <div className="text-center p-4 max-w-sm">
           <div className="text-4xl mb-4">🤔</div>
-          <h2 className="text-xl font-bold text-tg-text mb-2">Не удалось определить пользователя</h2>
-          <p className="text-lg text-tg-hint">Пожалуйста, откройте приложение через Telegram. Вне Telegram, мы не можем вас идентифицировать.</p>
+          <h2 className="text-xl font-bold text-tg-text mb-2">Ошибка инициализации</h2>
+          <p className="text-base text-tg-hint break-words">
+             {initError 
+              ? initError 
+              : 'Не удалось определить пользователя Telegram. Пожалуйста, убедитесь, что приложение открыто внутри Telegram.'
+            }
+          </p>
         </div>
       </div>
     );
@@ -214,6 +230,12 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-tg-bg font-sans p-4">
       <div className="max-w-md mx-auto">
+        {dataError && (
+          <div className="bg-red-900/50 border border-red-700 text-red-200 p-3 rounded-xl mb-4 text-sm" role="alert">
+            <p className="font-bold mb-1">⚠️ Ошибка данных</p>
+            <p>{dataError}</p>
+          </div>
+        )}
         <Header currentView={view} setView={setView} />
         <main className="mt-4">
           {view === AppView.ROULETTE && currentUser && (
