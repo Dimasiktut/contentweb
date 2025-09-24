@@ -1,5 +1,7 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
-import type { RecordSubscription } from 'pocketbase';
+// Fix: Correctly import the RecordSubscriptionEvent type for PocketBase real-time subscriptions.
+import type { RecordSubscriptionEvent } from 'pocketbase';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
@@ -12,6 +14,8 @@ declare global {
     Telegram: any;
   }
 }
+
+const LOCAL_STORAGE_USER_KEY = 'team-roulette-user-id';
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.ROULETTE);
@@ -29,19 +33,33 @@ const App: React.FC = () => {
       try {
         setInitError(null);
         let user: User | null = null;
-        try {
-          // Find user by their telegram ID instead of the record ID
-          user = await pb.collection('users').getFirstListItem<User>(`tg_id = ${tgUser.id}`);
-        } catch (error: any) {
-          if (error.status === 404) {
-            user = null; // Not found, will be created below
-          } else {
-            throw error; // Rethrow other errors
+        const storedUserId = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
+
+        // 1. Пытаемся найти пользователя по ID из localStorage
+        if (storedUserId) {
+          try {
+            user = await pb.collection('users').getOne<User>(storedUserId);
+          } catch (error: any) {
+            console.warn("Failed to fetch user from localStorage ID, clearing it.", error);
+            localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+          }
+        }
+
+        // 2. Если не нашли, ищем по tg_id
+        if (!user) {
+          try {
+            user = await pb.collection('users').getFirstListItem<User>(`tg_id = ${tgUser.id}`);
+          } catch (error: any) {
+            if (error.status === 404) {
+              user = null; // Не найден, будет создан ниже
+            } else {
+              throw error; // Перебрасываем другие ошибки
+            }
           }
         }
 
         if (user) {
-          // User exists, check for avatar update
+          // Пользователь существует, обновляем аватар если нужно
           const avatarUrl = tgUser.photo_url || user.avatarUrl;
           if (avatarUrl !== user.avatarUrl) {
             const updatedUser = await pb.collection('users').update<User>(user.id, { avatarUrl });
@@ -49,8 +67,9 @@ const App: React.FC = () => {
           } else {
             setCurrentUser(user);
           }
+          localStorage.setItem(LOCAL_STORAGE_USER_KEY, user.id); // Сохраняем ID на случай если его не было
         } else {
-          // User not found, create one with robust retry logic for username
+          // 3. Пользователь не найден, создаем нового
           let username = (tgUser.username || `user_${tgUser.id}`).toLowerCase().replace(/ /g, '_');
           
           const newUserPayload = {
@@ -67,17 +86,17 @@ const App: React.FC = () => {
           try {
             const createdUser = await pb.collection('users').create<User>(newUserPayload);
             setCurrentUser(createdUser);
+            localStorage.setItem(LOCAL_STORAGE_USER_KEY, createdUser.id);
           } catch (creationError: any) {
-            // Handle potential username collision on creation
+            // Обработка возможного конфликта имен
             const isUsernameError = creationError.originalError?.data?.data?.username?.code === 'validation_not_unique';
             if (isUsernameError) {
               console.warn(`Username ${username} is taken. Retrying with a more unique name.`);
-              // Append tg_id to make it unique and retry
               newUserPayload.username = `${username}_${tgUser.id}`;
               const createdUserWithSuffix = await pb.collection('users').create<User>(newUserPayload);
               setCurrentUser(createdUserWithSuffix);
+              localStorage.setItem(LOCAL_STORAGE_USER_KEY, createdUserWithSuffix.id);
             } else {
-              // Re-throw other creation errors to be caught by the outer block
               throw creationError;
             }
           }
@@ -154,7 +173,7 @@ const App: React.FC = () => {
     // Subscriptions
     const unsubscribers: (() => void)[] = [];
 
-    const subscribeToCollection = async (collectionName: string, callback: (data: RecordSubscription<any>) => void) => {
+    const subscribeToCollection = async (collectionName: string, callback: (data: RecordSubscriptionEvent<any>) => void) => {
         try {
             const unsub = await pb.collection(collectionName).subscribe('*', callback);
             unsubscribers.push(unsub);
@@ -163,14 +182,14 @@ const App: React.FC = () => {
         }
     };
 
-    subscribeToCollection('users', (e: RecordSubscription<User>) => {
+    subscribeToCollection('users', (e: RecordSubscriptionEvent<User>) => {
         setUsers(prev => {
           const filtered = prev.filter(u => u.id !== e.record.id);
           return e.action === 'delete' ? filtered : [...filtered, e.record].sort((a,b) => b.stats_wins - a.stats_wins);
         });
     });
 
-    subscribeToCollection('options', (e: RecordSubscription<Option>) => {
+    subscribeToCollection('options', (e: RecordSubscriptionEvent<Option>) => {
         setOptions(prev => {
             if (e.action === 'delete') return prev.filter(o => o.id !== e.record.id);
             if (e.action === 'create') return [...prev, e.record];
@@ -178,7 +197,7 @@ const App: React.FC = () => {
         });
     });
 
-    subscribeToCollection('history', (e: RecordSubscription<WinRecord>) => {
+    subscribeToCollection('history', (e: RecordSubscriptionEvent<WinRecord>) => {
          setWinHistory(prev => [e.record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
     });
     
