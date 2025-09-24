@@ -73,3 +73,26 @@ export interface Purchase extends BaseRecord {
   reward_icon: string;
   cost: number;
 }
+
+// Типы для дуэлей
+export enum DuelStatus {
+  PENDING = 'pending',
+  ACCEPTED = 'accepted',
+  CHALLENGER_CHOSE = 'challenger_chose',
+  OPPONENT_CHOSE = 'opponent_chose',
+  COMPLETED = 'completed',
+  DECLINED = 'declined',
+  EXPIRED = 'expired',
+}
+
+export type DuelChoice = 'rock' | 'paper' | 'scissors';
+
+export interface Duel extends BaseRecord {
+  challenger: string; // User ID
+  opponent: string; // User ID
+  stake: number;
+  status: DuelStatus;
+  challenger_choice?: DuelChoice;
+  opponent_choice?: DuelChoice;
+  winner?: string; // User ID
+}
