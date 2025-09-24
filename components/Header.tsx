@@ -17,8 +17,8 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
   };
 
   return (
-    <header className="bg-tg-secondary-bg p-1 rounded-xl shadow-lg flex items-center justify-between">
-      <div className="flex space-x-1 flex-grow">
+    <header className="bg-tg-secondary-bg p-2 rounded-xl shadow-lg flex flex-wrap items-center justify-between gap-y-2 gap-x-4">
+      <div className="flex space-x-1 flex-grow min-w-[240px]">
         <button onClick={() => setView(AppView.ROULETTE)} className={getButtonClass(AppView.ROULETTE)}>
           Рулетка
         </button>
@@ -33,7 +33,7 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
         </button>
       </div>
       {currentUser && (
-        <div className="flex items-center divide-x divide-gray-600 pl-2">
+        <div className="flex items-center divide-x divide-gray-600">
           <div className="flex items-center space-x-1 pr-2 text-yellow-400" title={`${currentUser.energy} энергии`}>
             <span className="text-xl">⚡️</span>
             <span className="font-bold text-base">{currentUser.energy}</span>
