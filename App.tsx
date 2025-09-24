@@ -86,6 +86,8 @@ const App: React.FC = () => {
   const [pendingChessGames, setPendingChessGames] = useState<ChessGame[]>([]);
   const [ongoingChessGames, setOngoingChessGames] = useState<ChessGame[]>([]);
 
+  // State to trigger resubscription on websocket reconnect
+  const [reconnectCounter, setReconnectCounter] = useState(0);
 
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
@@ -198,6 +200,21 @@ const App: React.FC = () => {
        initializeUser({ id: 123456789, username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
     }
   }, []);
+
+  // Effect to handle realtime connection changes
+  useEffect(() => {
+    // PocketBase JS SDK's onConnectionChange doesn't return an unsubscribe function
+    // and there's no public method to remove a listener. This is a minor leak,
+    // but acceptable as this component is the root and lives for the app's lifetime.
+    pb.realtime.onConnectionChange((status) => {
+      console.log('Realtime connection status:', status);
+      // When the connection is restored, trigger a full data refresh and re-subscription
+      if (status === 'reconnect') {
+        console.log('Reconnected to PocketBase. Refreshing data and subscriptions...');
+        setReconnectCounter(c => c + 1);
+      }
+    });
+  }, []); // Empty dependency array ensures this runs only once on mount
 
   // Real-time listeners
   useEffect(() => {
@@ -366,7 +383,7 @@ const App: React.FC = () => {
     return () => {
         unsubscribers.forEach(unsub => unsub());
     };
-}, [currentUser, activeDuel, activeChessGame]);
+}, [currentUser, activeDuel, activeChessGame, reconnectCounter]);
 
   const handleAddOption = useCallback(async (text: string, category: string) => { /* ... no changes ... */ }, [currentUser]);
   const handleRemoveOption = useCallback(async (idToRemove: string) => { /* ... no changes ... */ }, []);
