@@ -1,5 +1,4 @@
-// FIX: Corrected the PocketBase import to use a default import. The module
-// provides a default export, and the previous named import was causing a syntax error.
+// FIX: Switched to a named import for `PocketBase` to resolve the "no default export" error. The `pocketbase` library uses named exports.
 import PocketBase from 'pocketbase';
 
 const POCKETBASE_URL = 'https://pocketbase-production-63f9.up.railway.app';

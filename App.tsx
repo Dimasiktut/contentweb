@@ -238,12 +238,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
-    let unsubscribers: (() => void)[] = [];
-
     const setupSubscriptions = async () => {
-        // Force unsubscribe from all existing subscriptions before re-subscribing.
-        // This helps to prevent "Missing or invalid client id" errors on connection loss or server restart.
-        pb.realtime.unsubscribe();
+        // Data is fetched, and then subscriptions are established.
+        // The cleanup function for this effect handles unsubscribing, which is crucial for reconnections.
         try {
             const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes, ongoingChessGamesRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
@@ -297,7 +294,6 @@ const App: React.FC = () => {
       const subscribeToCollection = async (collectionName: string, callback: (data: RecordSubscription) => void) => {
           try {
               await pb.collection(collectionName).subscribe('*', callback);
-              unsubscribers.push(() => pb.collection(collectionName).unsubscribe('*'));
           } catch (err) {
               console.error(`Failed to subscribe to ${collectionName}:`, err);
           }
@@ -398,8 +394,10 @@ const App: React.FC = () => {
 
     setupSubscriptions();
     
+    // This cleanup function is crucial for handling reconnections.
+    // It unsubscribes from all collections, preventing errors from stale client IDs.
     return () => {
-        unsubscribers.forEach(unsub => unsub());
+        pb.realtime.unsubscribe();
     };
 }, [currentUser, activeDuel, activeChessGame, reconnectCounter]);
 
