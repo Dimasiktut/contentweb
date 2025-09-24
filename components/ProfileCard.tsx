@@ -58,7 +58,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, isCurrentUs
         </div>
       </div>
 
-      {user.achievements.length > 0 && (
+      {(user.achievements?.length > 0) && (
         <div className="mt-6">
           <h4 className="font-bold text-tg-text mb-2">Ачивки</h4>
           <div className="flex flex-wrap gap-3 p-3 bg-tg-bg rounded-lg">
