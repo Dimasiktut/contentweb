@@ -43,7 +43,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, isCurrentUs
         </div>
       </div>
 
-      <div className="mt-6 grid grid-cols-3 gap-4 text-center">
+      <div className="mt-6 grid grid-cols-2 gap-x-4 gap-y-5 text-center">
         <div>
           <p className="text-2xl font-bold">{user.stats_ideasProposed}</p>
           <p className="text-sm text-tg-hint">Идей</p>
@@ -51,6 +51,10 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, isCurrentUs
         <div>
           <p className="text-2xl font-bold">{user.stats_wins}</p>
           <p className="text-sm text-tg-hint">Побед</p>
+        </div>
+        <div>
+          <p className="text-2xl font-bold text-amber-400">{user.points || 0}</p>
+          <p className="text-sm text-tg-hint">Баллов</p>
         </div>
         <div className="min-w-0 overflow-hidden">
            <p className="text-2xl font-bold text-tg-link capitalize truncate" title={favoriteCategory}>{favoriteCategory}</p>

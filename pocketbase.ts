@@ -1,4 +1,4 @@
-import PocketBase from 'pocketbase';
+import PocketBase from 'https://cdn.jsdelivr.net/npm/pocketbase@latest/dist/pocketbase.es.mjs';
 
 const POCKETBASE_URL = 'https://pocketbase-production-63f9.up.railway.app';
 

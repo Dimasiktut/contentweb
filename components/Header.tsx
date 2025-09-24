@@ -9,7 +9,7 @@ interface HeaderProps {
 
 const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) => {
   const getButtonClass = (view: AppView) => {
-    return `w-full py-3 text-sm font-bold rounded-lg transition-colors duration-300 ${
+    return `w-full py-2.5 text-xs font-bold rounded-lg transition-colors duration-300 ${
       currentView === view
         ? 'bg-tg-button text-tg-button-text'
         : 'bg-tg-secondary-bg text-tg-hint hover:bg-gray-700'
@@ -25,14 +25,23 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
         <button onClick={() => setView(AppView.PROFILES)} className={getButtonClass(AppView.PROFILES)}>
           Профили
         </button>
+         <button onClick={() => setView(AppView.REWARDS)} className={getButtonClass(AppView.REWARDS)}>
+          Магазин
+        </button>
         <button onClick={() => setView(AppView.HISTORY)} className={getButtonClass(AppView.HISTORY)}>
           История
         </button>
       </div>
       {currentUser && (
-        <div className="flex items-center space-x-1 px-3 text-yellow-400" title={`${currentUser.energy} энергии`}>
-          <span className="text-2xl">⚡️</span>
-          <span className="font-bold text-lg">{currentUser.energy}</span>
+        <div className="flex items-center divide-x divide-gray-600 pl-2">
+          <div className="flex items-center space-x-1 pr-2 text-yellow-400" title={`${currentUser.energy} энергии`}>
+            <span className="text-xl">⚡️</span>
+            <span className="font-bold text-base">{currentUser.energy}</span>
+          </div>
+           <div className="flex items-center space-x-1 pl-2 text-amber-400" title={`${currentUser.points} баллов`}>
+            <span className="text-xl">🪙</span>
+            <span className="font-bold text-base">{currentUser.points}</span>
+          </div>
         </div>
       )}
     </header>

@@ -33,6 +33,7 @@ export interface User extends BaseRecord {
   stats_winStreak: number;
   achievements: AchievementId[];
   energy: number;
+  points: number;
   last_energy_update: string;
 }
 
@@ -53,4 +54,20 @@ export enum AppView {
   ROULETTE = 'ROULETTE',
   PROFILES = 'PROFILES',
   HISTORY = 'HISTORY',
+  REWARDS = 'REWARDS',
+}
+
+// Глобальное состояние для синхронизации
+export interface AppState extends BaseRecord {
+  roulette_status: 'idle' | 'spinning';
+  roulette_winner_id: string; // ID опции-победителя
+  roulette_spinning_by: string; // ID пользователя, запустившего рулетку
+}
+
+// Награды в магазине
+export interface Reward extends BaseRecord {
+  name: string;
+  description: string;
+  cost: number;
+  icon: string;
 }
