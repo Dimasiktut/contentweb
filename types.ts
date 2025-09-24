@@ -24,7 +24,7 @@ export interface Achievement {
 }
 
 export interface User extends BaseRecord {
-  // id унаследован от tg
+  tg_id: number;
   username: string;
   avatarUrl: string;
   role: string;

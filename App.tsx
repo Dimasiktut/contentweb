@@ -1,11 +1,17 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import type { RecordSubscription } from 'pocketbase';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import { User, Option, AppView, AchievementId, WinRecord } from './types';
 import { pb } from './pocketbase';
+
+// FIX: The type `RecordSubscription` could not be imported from 'pocketbase' due to a module resolution issue.
+// It is defined here locally to ensure type safety for subscription callbacks.
+type RecordSubscription<T> = {
+    action: "create" | "update" | "delete";
+    record: T;
+};
 
 declare global {
   interface Window {
@@ -25,29 +31,48 @@ const App: React.FC = () => {
   useEffect(() => {
     const initializeUser = async (tgUser: any) => {
       try {
-        const user = await pb.collection('users').getOne<User>(tgUser.id.toString());
-        const avatarUrl = tgUser.photo_url || user.avatarUrl;
-        if (avatarUrl !== user.avatarUrl) {
+        let user: User | null = null;
+        try {
+          // Find user by their telegram ID instead of the record ID
+          user = await pb.collection('users').getFirstListItem<User>(`tg_id = ${tgUser.id}`);
+        } catch (error: any) {
+          if (error.status === 404) {
+            user = null; // Not found, will be created below
+          } else {
+            throw error; // Rethrow other errors
+          }
+        }
+
+        if (user) {
+          // User exists, check for avatar update
+          const avatarUrl = tgUser.photo_url || user.avatarUrl;
+          if (avatarUrl !== user.avatarUrl) {
             const updatedUser = await pb.collection('users').update<User>(user.id, { avatarUrl });
             setCurrentUser(updatedUser);
-        } else {
+          } else {
             setCurrentUser(user);
+          }
+        } else {
+          // User not found, create a new one, letting PocketBase generate the ID
+          const newUserPayload = {
+            tg_id: tgUser.id,
+            username: tgUser.username || `${tgUser.first_name}_${tgUser.last_name || ''}`.toLowerCase(),
+            avatarUrl: tgUser.photo_url || `https://picsum.photos/seed/${tgUser.id}/100/100`,
+            role: 'Участник',
+            stats_ideasProposed: 0,
+            stats_wins: 0,
+            stats_winStreak: 0,
+            achievements: [],
+          };
+          const createdUser = await pb.collection('users').create<User>(newUserPayload);
+          setCurrentUser(createdUser);
         }
       } catch (error) {
-        // User not found, create a new one
-        const newUser: Omit<User, 'id' | 'created' | 'updated' | 'collectionId' | 'collectionName'> = {
-          username: tgUser.username || `${tgUser.first_name}_${tgUser.last_name || ''}`.toLowerCase(),
-          avatarUrl: tgUser.photo_url || `https://picsum.photos/seed/${tgUser.id}/100/100`,
-          role: 'Участник',
-          stats_ideasProposed: 0,
-          stats_wins: 0,
-          stats_winStreak: 0,
-          achievements: [],
-        };
-        const createdUser = await pb.collection('users').create<User>({ id: tgUser.id.toString(), ...newUser });
-        setCurrentUser(createdUser);
+        console.error("Critical error during user initialization:", error);
+        // Can't proceed without a user
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     const tg = window.Telegram?.WebApp;
@@ -60,42 +85,51 @@ const App: React.FC = () => {
       } else {
         // For development outside Telegram, create a mock user
         console.warn("Telegram user not found. Creating a mock user for development.");
-        initializeUser({ id: '123456789', username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
+        initializeUser({ id: 123456789, username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
       }
     } else {
       console.warn("Telegram Web App script not loaded. Running in development mode with a mock user.");
-       initializeUser({ id: '123456789', username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
+       initializeUser({ id: 123456789, username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
     }
   }, []);
 
   // Real-time listeners for data from PocketBase
   useEffect(() => {
     // Initial fetch
-    pb.collection('users').getFullList<User>().then(setUsers);
-    pb.collection('options').getFullList<Option>().then(setOptions);
-    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory);
+    pb.collection('users').getFullList<User>().then(setUsers).catch(err => console.error("Failed to fetch users", err));
+    pb.collection('options').getFullList<Option>().then(setOptions).catch(err => console.error("Failed to fetch options", err));
+    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory).catch(err => console.error("Failed to fetch history", err));
 
     // Subscriptions
     const unsubscribers: (() => void)[] = [];
 
-    pb.collection('users').subscribe('*', (e: RecordSubscription<User>) => {
+    const subscribeToCollection = async (collectionName: string, callback: (data: RecordSubscription<any>) => void) => {
+        try {
+            const unsub = await pb.collection(collectionName).subscribe('*', callback);
+            unsubscribers.push(unsub);
+        } catch (err) {
+            console.error(`Failed to subscribe to ${collectionName}:`, err);
+        }
+    };
+
+    subscribeToCollection('users', (e: RecordSubscription<User>) => {
         setUsers(prev => {
           const filtered = prev.filter(u => u.id !== e.record.id);
           return e.action === 'delete' ? filtered : [...filtered, e.record].sort((a,b) => b.stats_wins - a.stats_wins);
         });
-    }).then(unsub => unsubscribers.push(unsub));
+    });
 
-    pb.collection('options').subscribe('*', (e: RecordSubscription<Option>) => {
+    subscribeToCollection('options', (e: RecordSubscription<Option>) => {
         setOptions(prev => {
             if (e.action === 'delete') return prev.filter(o => o.id !== e.record.id);
             if (e.action === 'create') return [...prev, e.record];
             return prev.map(o => o.id === e.record.id ? e.record : o);
         });
-    }).then(unsub => unsubscribers.push(unsub));
+    });
 
-    pb.collection('history').subscribe('*', (e: RecordSubscription<WinRecord>) => {
+    subscribeToCollection('history', (e: RecordSubscription<WinRecord>) => {
          setWinHistory(prev => [e.record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
-    }).then(unsub => unsubscribers.push(unsub));
+    });
     
     // Cleanup on unmount
     return () => {
@@ -165,7 +199,7 @@ const App: React.FC = () => {
     );
   }
   
-  if (!currentUser && !isLoading) {
+  if (!currentUser) {
      return (
       <div className="min-h-screen bg-tg-bg flex items-center justify-center">
         <div className="text-center p-4">

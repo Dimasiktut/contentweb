@@ -1,5 +1,6 @@
-// FIX: Replaced combined import with a default-only import to resolve a potential module resolution issue that caused the "no default export" error.
-import PocketBase from 'pocketbase';
+// Fix: Updated the import to point directly to the ES module distribution file.
+// This is a common workaround for module resolution issues with some bundlers.
+import PocketBase from 'pocketbase/dist/pocketbase.es.js';
 
 const POCKETBASE_URL = 'https://pocketbase-production-63f9.up.railway.app';
 
