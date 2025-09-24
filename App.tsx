@@ -8,6 +8,7 @@ import HistoryView from './components/HistoryView';
 import RewardsView from './components/RewardsView';
 import DuelView from './components/DuelView';
 import DuelInvitation from './components/DuelInvitation';
+import DuelHistoryView from './components/DuelHistoryView';
 import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice } from './types';
 import { pb } from './pocketbase';
 
@@ -48,6 +49,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [options, setOptions] = useState<Option[]>([]);
   const [winHistory, setWinHistory] = useState<WinRecord[]>([]);
+  const [duelHistory, setDuelHistory] = useState<Duel[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -186,11 +188,16 @@ const App: React.FC = () => {
     const setupSubscriptions = async () => {
         try {
             // Fetch primary data that should not fail
-            const [usersRes, optionsRes, historyRes, rewardsRes] = await Promise.all([
+            const [usersRes, optionsRes, historyRes, rewardsRes, duelsRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
                 pb.collection('options').getFullList<Option>({ requestKey: null }),
                 pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
-                pb.collection('rewards').getFullList<Reward>({ requestKey: null })
+                pb.collection('rewards').getFullList<Reward>({ requestKey: null }),
+                pb.collection('duels').getFullList<Duel>({
+                    filter: `(challenger = "${currentUser.id}" || opponent = "${currentUser.id}") && (status != "pending" && status != "accepted")`,
+                    sort: '-created',
+                    requestKey: null
+                })
             ]);
 
             usersRes.sort((a, b) => b.stats_wins - a.stats_wins);
@@ -200,6 +207,7 @@ const App: React.FC = () => {
             setOptions(optionsRes);
             setWinHistory(historyRes);
             setRewards(rewardsRes);
+            setDuelHistory(duelsRes);
 
             // Fetch purchases separately as it might fail due to API rules
             try {
@@ -221,6 +229,7 @@ const App: React.FC = () => {
             setWinHistory([]);
             setRewards([]);
             setPurchases([]);
+            setDuelHistory([]);
         }
 
 
@@ -281,12 +290,18 @@ const App: React.FC = () => {
             if (activeDuel && activeDuel.id === record.id) {
                 setActiveDuel(record);
             }
+            if ([DuelStatus.COMPLETED, DuelStatus.DECLINED, DuelStatus.CANCELLED, DuelStatus.EXPIRED].includes(record.status)) {
+                setDuelHistory(prev => [record, ...prev.filter(d => d.id !== record.id)].sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+                 if (activeDuel && activeDuel.id === record.id) {
+                   // No need to close immediately, DuelView will show result. User will close it manually.
+                }
+            }
         } else if (e.action === 'delete') {
             setDuelInvitations(prev => prev.filter(d => d.id !== record.id));
             if (activeDuel && activeDuel.id === record.id) {
                 setActiveDuel(null);
                 setView(AppView.PROFILES);
-                alert("Дуэль была отменена.");
+                alert("Дуэль была отменена администратором.");
             }
         }
       });
@@ -443,7 +458,7 @@ const App: React.FC = () => {
   const handleAcceptDuel = useCallback(async (duel: Duel) => {
     if (!currentUser || currentUser.points < DUEL_COST) {
       alert("Недостаточно баллов для принятия дуэли!");
-      await pb.collection('duels').delete(duel.id, { requestKey: null }).catch();
+      await pb.collection('duels').update(duel.id, { status: DuelStatus.DECLINED }, { requestKey: null }).catch();
       return;
     }
     try {
@@ -461,12 +476,24 @@ const App: React.FC = () => {
 
   const handleDeclineDuel = useCallback(async (duelId: string) => {
     try {
-      await pb.collection('duels').delete(duelId, { requestKey: null });
+      await pb.collection('duels').update(duelId, { status: DuelStatus.DECLINED }, { requestKey: null });
       setDuelInvitations(prev => prev.filter(d => d.id !== duelId));
     } catch(error) {
       console.error("Failed to decline duel:", error);
     }
   }, []);
+  
+  const handleCancelDuel = useCallback(async () => {
+    if (!activeDuel) return;
+    try {
+        await pb.collection('duels').update(activeDuel.id, { status: DuelStatus.CANCELLED }, { requestKey: null });
+        setActiveDuel(null);
+        setView(AppView.PROFILES);
+    } catch (error) {
+        console.error("Failed to cancel duel:", error);
+        alert('Не удалось отменить дуэль.');
+    }
+  }, [activeDuel]);
 
   const handleMakeDuelChoice = useCallback(async (choice: DuelChoice) => {
     if (!activeDuel || !currentUser) return;
@@ -590,6 +617,7 @@ const App: React.FC = () => {
           {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && currentUser && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
+          {view === AppView.DUEL_HISTORY && currentUser && <DuelHistoryView history={duelHistory} users={users} currentUser={currentUser} />}
           {view === AppView.DUEL && currentUser && activeDuel && (
             <DuelView
                 currentUser={currentUser}
@@ -597,6 +625,7 @@ const App: React.FC = () => {
                 users={users}
                 onMakeChoice={handleMakeDuelChoice}
                 onClose={handleCloseDuel}
+                onCancel={handleCancelDuel}
             />
           )}
         </main>
