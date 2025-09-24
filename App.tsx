@@ -6,7 +6,8 @@ import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import RewardsView from './components/RewardsView';
-import { User, Option, AppView, AchievementId, WinRecord, AppState, Reward } from './types';
+import DuelView from './components/DuelView';
+import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase } from './types';
 import { pb } from './pocketbase';
 
 // FIX: Added local type definition for RecordSubscription to replace the removed import.
@@ -22,6 +23,8 @@ declare global {
 }
 
 const LOCAL_STORAGE_USER_KEY = 'team-roulette-user-id';
+const DUEL_COST = 10;
+
 
 // Helper function to check if it's a new day
 const needsEnergyUpdate = (lastUpdateDate: string | null): boolean => {
@@ -41,11 +44,18 @@ const App: React.FC = () => {
   const [options, setOptions] = useState<Option[]>([]);
   const [winHistory, setWinHistory] = useState<WinRecord[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [appState, setAppState] = useState<AppState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [initError, setInitError] = useState<string | null>(null);
   const [dataErrors, setDataErrors] = useState<string[]>([]);
+  
+  // Local state for roulette control
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [isProcessingWin, setIsProcessingWin] = useState(false);
+  const [winnerForAnimation, setWinnerForAnimation] = useState<Option | null>(null);
+  const [currentDuel, setCurrentDuel] = useState<{ opponent: User; stake: number } | null>(null);
+
 
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
@@ -58,7 +68,7 @@ const App: React.FC = () => {
 
         if (storedUserId) {
           try {
-            user = await pb.collection('users').getOne<User>(storedUserId);
+            user = await pb.collection('users').getOne<User>(storedUserId, { requestKey: null });
           } catch (error: any) {
             console.warn("Failed to fetch user from localStorage ID, clearing it.", error);
             localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
@@ -67,7 +77,7 @@ const App: React.FC = () => {
 
         if (!user) {
           try {
-            user = await pb.collection('users').getFirstListItem<User>(`tg_id = ${tgUser.id}`);
+            user = await pb.collection('users').getFirstListItem<User>(`tg_id = ${tgUser.id}`, { requestKey: null });
           } catch (error: any) {
             if (error.status === 404) {
               user = null;
@@ -91,7 +101,7 @@ const App: React.FC = () => {
           }
 
           if (Object.keys(updatePayload).length > 0) {
-            const updatedUser = await pb.collection('users').update<User>(user.id, updatePayload);
+            const updatedUser = await pb.collection('users').update<User>(user.id, updatePayload, { requestKey: null });
             setCurrentUser(updatedUser);
           } else {
             setCurrentUser(user);
@@ -115,7 +125,7 @@ const App: React.FC = () => {
           };
 
           try {
-            const createdUser = await pb.collection('users').create<User>(newUserPayload);
+            const createdUser = await pb.collection('users').create<User>(newUserPayload, { requestKey: null });
             setCurrentUser(createdUser);
             localStorage.setItem(LOCAL_STORAGE_USER_KEY, createdUser.id);
           } catch (creationError: any) {
@@ -123,7 +133,7 @@ const App: React.FC = () => {
             if (isUsernameError) {
               console.warn(`Username ${username} is taken. Retrying with a more unique name.`);
               newUserPayload.username = `${username}_${tgUser.id}`;
-              const createdUserWithSuffix = await pb.collection('users').create<User>(newUserPayload);
+              const createdUserWithSuffix = await pb.collection('users').create<User>(newUserPayload, { requestKey: null });
               setCurrentUser(createdUserWithSuffix);
               localStorage.setItem(LOCAL_STORAGE_USER_KEY, createdUserWithSuffix.id);
             } else {
@@ -166,40 +176,43 @@ const App: React.FC = () => {
     let unsubscribers: (() => void)[] = [];
 
     const setupSubscriptions = async () => {
-        // Fetch initial data
         try {
-            const [usersRes, optionsRes, historyRes, appStateListRes, rewardsRes] = await Promise.all([
-                pb.collection('users').getFullList<User>(),
-                pb.collection('options').getFullList<Option>(),
-                pb.collection('history').getFullList<WinRecord>({ perPage: 50 }),
-                pb.collection('app_state').getFullList<AppState>({ perPage: 1 }),
-                pb.collection('rewards').getFullList<Reward>()
+            // Fetch primary data that should not fail
+            const [usersRes, optionsRes, historyRes, rewardsRes] = await Promise.all([
+                pb.collection('users').getFullList<User>({ requestKey: null }),
+                pb.collection('options').getFullList<Option>({ requestKey: null }),
+                pb.collection('history').getFullList<WinRecord>({ sort: '-created', requestKey: null }),
+                pb.collection('rewards').getFullList<Reward>({ requestKey: null })
             ]);
-            
-            if (appStateListRes.length === 0) {
-              throw new Error("Запись состояния приложения не найдена. Убедитесь, что в коллекции 'app_state' есть одна запись.");
-            }
-            const appStateRes = appStateListRes[0];
 
-            // Sort data on the client-side for robustness
             usersRes.sort((a, b) => b.stats_wins - a.stats_wins);
             optionsRes.sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime());
-            historyRes.sort((a, b) => b.timestamp - a.timestamp);
 
             setUsers(usersRes);
             setOptions(optionsRes);
             setWinHistory(historyRes);
-            setAppState(appStateRes);
             setRewards(rewardsRes);
 
-            // Subscribe to AppState changes
-            const appStateUnsub = await pb.collection('app_state').subscribe<AppState>(appStateRes.id, (e) => setAppState(e.record));
-            unsubscribers.push(appStateUnsub);
-        
+            // Fetch purchases separately as it might fail due to API rules
+            try {
+                const purchasesRes = await pb.collection('purchases').getFullList<Purchase>({ filter: `user = "${currentUser.id}"`, sort: '-created', requestKey: null });
+                setPurchases(purchasesRes);
+            } catch (purchaseError: any) {
+                console.error("Failed to fetch purchases. This might be due to restrictive API rules on the 'purchases' collection.", purchaseError);
+                setDataErrors(prev => [...prev, "Не удалось загрузить историю покупок. Проверьте права доступа в PocketBase."]);
+                setPurchases([]); // Set to empty array on failure
+            }
+
         } catch (err: any) {
             console.error("Error fetching initial data:", err);
-            const errorMessage = err.message || "Не удалось загрузить данные или подписаться на обновления.";
+            const errorMessage = err.message || "Не удалось загрузить основные данные приложения.";
             setDataErrors(prev => [...prev, errorMessage]);
+            // Set essential states to empty arrays to prevent crashes
+            setUsers([]);
+            setOptions([]);
+            setWinHistory([]);
+            setRewards([]);
+            setPurchases([]);
         }
 
 
@@ -234,7 +247,16 @@ const App: React.FC = () => {
 
       subscribeToCollection('history', (e) => {
         const record = e.record as WinRecord;
-        setWinHistory(prev => [record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
+        setWinHistory(prev => [record, ...prev].sort((a,b) => new Date(b.created).getTime() - new Date(a.created).getTime()));
+      });
+      
+      subscribeToCollection('purchases', (e) => {
+        const record = e.record as Purchase;
+        if (record.user !== currentUser.id) return;
+        setPurchases(prev => {
+           if (e.action === 'create') return [record, ...prev];
+           return prev; // No updates/deletes handled for now
+        });
       });
     }
 
@@ -242,64 +264,60 @@ const App: React.FC = () => {
     
     return () => {
         unsubscribers.forEach(unsub => unsub());
-        pb.autoCancellation(true);
     };
 }, [currentUser]);
 
   const handleAddOption = useCallback(async (text: string, category: string) => {
     if (!currentUser || currentUser.energy < 1) return;
     const newOption = { text, category, author: currentUser.id };
-    await pb.collection('options').create(newOption);
-    await pb.collection('users').update(currentUser.id, { 'stats_ideasProposed+': 1, 'energy-': 1 });
+    await pb.collection('options').create(newOption, { requestKey: null });
+    await pb.collection('users').update(currentUser.id, { 'stats_ideasProposed+': 1, 'energy-': 1 }, { requestKey: null });
   }, [currentUser]);
 
   const handleRemoveOption = useCallback(async (idToRemove: string) => {
-    await pb.collection('options').delete(idToRemove);
+    await pb.collection('options').delete(idToRemove, { requestKey: null });
   }, []);
   
   const handleSpinRequest = useCallback(async () => {
-    if (!currentUser || !appState || options.length < 2 || currentUser.energy < 5 || appState.roulette_status !== 'idle') {
+    if (!currentUser || options.length < 2 || currentUser.energy < 5 || isSpinning || isProcessingWin) {
         return;
     }
     try {
-        await pb.collection('users').update(currentUser.id, { 'energy-': 5 });
+        setIsSpinning(true);
+        await pb.collection('users').update(currentUser.id, { 'energy-': 5 }, { requestKey: null });
         const winnerIndex = Math.floor(Math.random() * options.length);
         const winnerOption = options[winnerIndex];
-        await pb.collection('app_state').update(appState.id, {
-            roulette_status: 'spinning',
-            roulette_winner_id: winnerOption.id,
-            roulette_spinning_by: currentUser.id,
-        });
+        setWinnerForAnimation(winnerOption); // Trigger animation in Roulette component
     } catch (error) {
         console.error("Failed to start spin:", error);
+        setIsSpinning(false); // Reset on error
     }
-  }, [currentUser, appState, options]);
+  }, [currentUser, options, isSpinning, isProcessingWin]);
 
   const handleSpinEnd = useCallback(async (winnerOption: Option) => {
-    if (!appState || !currentUser || currentUser.id !== appState.roulette_spinning_by) return;
-    
     // 1. Create history record
     await pb.collection('history').create({
         option_text: winnerOption.text,
         option_category: winnerOption.category,
         author: winnerOption.author,
         timestamp: Date.now()
-    });
+    }, { requestKey: null });
     
     // 2. Award points to spinner
-    try {
-      await pb.collection('users').update(currentUser.id, { 'points+': 5 });
-    } catch(error) {
-      console.error("Failed to award points to spinner:", error);
+    if (currentUser) {
+      try {
+        await pb.collection('users').update(currentUser.id, { 'points+': 5 }, { requestKey: null });
+      } catch(error) {
+        console.error("Failed to award points to spinner:", error);
+      }
     }
+
 
     // 3. Update winner's stats
     try {
-        // Force a fetch from the network to avoid any potential SDK/browser caching issues
         const winnerUser = await pb.collection('users').getOne<User>(winnerOption.author, { requestKey: null });
         
         const newWinStreak = winnerUser.stats_winStreak + 1;
-        // Ensure achievements is an array to prevent errors
         const newAchievements = [...(winnerUser.achievements || [])]; 
         
         if (newWinStreak >= 3 && !newAchievements.includes(AchievementId.LUCKY)) {
@@ -312,23 +330,31 @@ const App: React.FC = () => {
             achievements: newAchievements,
             'energy+': 5,
             'points+': 25,
-        });
+        }, { requestKey: null });
     } catch (error: any) {
         console.error("Failed to update winner stats:", error);
-        if (error.originalError) {
-          console.error("PocketBase original error:", JSON.stringify(error.originalError, null, 2));
-        }
         setDataErrors(prev => [...prev, "Не удалось обновить статистику победителя."]);
     }
-
-    // 4. Reset app state for everyone
-    await pb.collection('app_state').update(appState.id, {
-        roulette_status: 'idle',
-        roulette_winner_id: null,
-        roulette_spinning_by: null,
-    });
-  }, [appState, currentUser]);
+  }, [currentUser]);
   
+  const handleAnimationComplete = useCallback(async (winnerOption: Option) => {
+      if (!currentUser) return;
+      
+      // Reset state IMMEDIATELY to prevent re-triggering the animation from a re-render
+      setIsSpinning(false);
+      setWinnerForAnimation(null);
+      setIsProcessingWin(true);
+
+      try {
+        await handleSpinEnd(winnerOption);
+      } catch (error) {
+          console.error("Failed to process spin end:", error);
+          setDataErrors(prev => [...prev, "Ошибка при обработке результатов."]);
+      } finally {
+        setIsProcessingWin(false);
+      }
+  }, [currentUser, handleSpinEnd]);
+
   const handleBuyReward = useCallback(async (reward: Reward) => {
     if (!currentUser || currentUser.points < reward.cost) {
       alert("Недостаточно баллов!");
@@ -338,13 +364,62 @@ const App: React.FC = () => {
       return;
     }
     try {
-      await pb.collection('users').update(currentUser.id, { 'points-': reward.cost });
+      // First create the purchase record for atomicity
+      await pb.collection('purchases').create({
+        user: currentUser.id,
+        reward_name: reward.name,
+        reward_icon: reward.icon || '🎁',
+        cost: reward.cost
+      }, { requestKey: null });
+      // Then deduct points
+      await pb.collection('users').update(currentUser.id, { 'points-': reward.cost }, { requestKey: null });
       alert("Награда успешно приобретена!");
     } catch (error) {
       console.error("Failed to buy reward:", error);
-      alert("Не удалось приобрести награду.");
+      alert("Не удалось приобрести награду. Если баллы списались, а награда не появилась, обратитесь к администратору.");
     }
   }, [currentUser]);
+
+  const handleInitiateDuel = useCallback(async (opponent: User) => {
+    if (!currentUser || currentUser.points < DUEL_COST) {
+      alert("Недостаточно баллов для вызова на дуэль!");
+      return;
+    }
+    if (!confirm(`Вызвать @${opponent.username} на дуэль? Это будет стоить ${DUEL_COST} баллов.`)) {
+      return;
+    }
+    try {
+      await pb.collection('users').update(currentUser.id, { 'points-': DUEL_COST }, { requestKey: null });
+      setCurrentDuel({ opponent, stake: DUEL_COST });
+      setView(AppView.DUEL);
+    } catch (error) {
+      console.error("Failed to initiate duel:", error);
+      alert("Не удалось начать дуэль.");
+    }
+  }, [currentUser]);
+
+  const handleDuelComplete = useCallback(async (result: 'win' | 'loss' | 'draw') => {
+    if (!currentUser || !currentDuel) return;
+    const prize = currentDuel.stake * 2;
+    try {
+      if (result === 'win') {
+        await pb.collection('users').update(currentUser.id, { 'points+': prize }, { requestKey: null });
+        alert(`Вы выиграли ${prize} баллов!`);
+      } else if (result === 'loss') {
+        await pb.collection('users').update(currentDuel.opponent.id, { 'points+': prize }, { requestKey: null });
+        alert(`Противник выиграл ${prize} баллов.`);
+      } else { // draw
+        await pb.collection('users').update(currentUser.id, { 'points+': currentDuel.stake }, { requestKey: null });
+        alert("Ничья! Ваши баллы возвращены.");
+      }
+    } catch (error) {
+      console.error("Failed to update points after duel:", error);
+      alert("Ошибка при начислении награды.");
+    } finally {
+      setCurrentDuel(null);
+      setView(AppView.PROFILES);
+    }
+  }, [currentUser, currentDuel]);
 
   if (isLoading) {
     return (
@@ -387,21 +462,31 @@ const App: React.FC = () => {
         )}
         <Header currentView={view} setView={setView} currentUser={currentUser} />
         <main className="mt-4">
-          {view === AppView.ROULETTE && currentUser && appState && (
+          {view === AppView.ROULETTE && currentUser && (
             <Roulette
               options={options}
               users={users}
               onAddOption={handleAddOption}
               onRemoveOption={handleRemoveOption}
               onSpinRequest={handleSpinRequest}
-              onSpinEnd={handleSpinEnd}
+              onAnimationComplete={handleAnimationComplete}
               currentUser={currentUser}
-              appState={appState}
+              isSpinning={isSpinning}
+              isProcessingWin={isProcessingWin}
+              winnerForAnimation={winnerForAnimation}
             />
           )}
-          {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} currentUser={currentUser} />}
+          {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && currentUser && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
+          {view === AppView.DUEL && currentUser && currentDuel && (
+            <DuelView
+                currentUser={currentUser}
+                opponent={currentDuel.opponent}
+                stake={currentDuel.stake}
+                onDuelComplete={handleDuelComplete}
+            />
+          )}
         </main>
       </div>
     </div>

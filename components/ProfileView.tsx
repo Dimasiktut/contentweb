@@ -1,14 +1,16 @@
 import React from 'react';
-import { User, WinRecord } from '../types';
+import { User, WinRecord, Purchase } from '../types';
 import ProfileCard from './ProfileCard';
 
 interface ProfileViewProps {
   users: User[];
   winHistory: WinRecord[];
+  purchases: Purchase[];
   currentUser: User;
+  onInitiateDuel: (opponent: User) => void;
 }
 
-const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, currentUser }) => {
+const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, purchases, currentUser, onInitiateDuel }) => {
   const sortedUsers = [...users].sort((a, b) => {
     if (a.id === currentUser.id) return -1;
     if (b.id === currentUser.id) return 1;
@@ -21,8 +23,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({ users, winHistory, currentUse
         <ProfileCard 
           key={user.id} 
           user={user} 
-          winHistory={winHistory} 
+          winHistory={winHistory}
+          purchases={user.id === currentUser.id ? purchases : []}
           isCurrentUser={user.id === currentUser.id}
+          currentUser={currentUser}
+          onInitiateDuel={onInitiateDuel}
         />
       ))}
     </div>

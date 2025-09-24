@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
-import { Option, User, AppState } from '../types';
+import { Option, User } from '../types';
 
 interface RouletteProps {
   options: Option[];
@@ -7,9 +7,11 @@ interface RouletteProps {
   onAddOption: (text: string, category: string) => void;
   onRemoveOption: (id: string) => void;
   onSpinRequest: () => Promise<void>;
-  onSpinEnd: (winner: Option) => Promise<void>;
+  onAnimationComplete: (winner: Option) => Promise<void>;
   currentUser: User;
-  appState: AppState;
+  isSpinning: boolean;
+  isProcessingWin: boolean;
+  winnerForAnimation: Option | null;
 }
 
 const WinnerModal: React.FC<{ winner: Option; author: User; onClose: () => void }> = ({ winner, author, onClose }) => {
@@ -38,12 +40,11 @@ const WinnerModal: React.FC<{ winner: Option; author: User; onClose: () => void 
 };
 
 
-const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemoveOption, onSpinRequest, onSpinEnd, currentUser, appState }) => {
+const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemoveOption, onSpinRequest, onAnimationComplete, currentUser, isSpinning, isProcessingWin, winnerForAnimation }) => {
   const [newOption, setNewOption] = useState('');
   const [newCategory, setNewCategory] = useState('еда');
   const [winner, setWinner] = useState<Option | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const isSpinning = useMemo(() => appState.roulette_status === 'spinning', [appState.roulette_status]);
 
   const repeatedOptions = useMemo(() => {
     if (options.length === 0) return [];
@@ -52,12 +53,11 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
   }, [options]);
   
   useEffect(() => {
-    if (appState.roulette_status === 'spinning' && options.length > 0) {
-      const winnerOption = options.find(o => o.id === appState.roulette_winner_id);
-      if (!winnerOption || !listRef.current) return;
+    if (isSpinning && winnerForAnimation && options.length > 0) {
+      if (!listRef.current) return;
 
       const spinDuration = 5000;
-      const winnerIndexInOriginal = options.findIndex(o => o.id === winnerOption.id);
+      const winnerIndexInOriginal = options.findIndex(o => o.id === winnerForAnimation.id);
       
       if (winnerIndexInOriginal === -1) return;
 
@@ -78,20 +78,18 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
       listRef.current.style.transform = `translateY(-${targetY}px)`;
 
       setTimeout(() => {
-        setWinner(winnerOption);
-        if (currentUser.id === appState.roulette_spinning_by) {
-          onSpinEnd(winnerOption);
-        }
+        setWinner(winnerForAnimation);
+        onAnimationComplete(winnerForAnimation);
       }, spinDuration);
 
-    } else if (appState.roulette_status === 'idle') {
+    } else if (!isSpinning) {
        // Плавный сброс в начальное положение после закрытия модального окна
       if (winner === null && listRef.current) {
          listRef.current.style.transition = 'transform 0.5s ease-out';
          listRef.current.style.transform = 'translateY(0)';
       }
     }
-  }, [appState.roulette_status, options, currentUser.id, appState.roulette_spinning_by]);
+  }, [isSpinning, winnerForAnimation, options, onAnimationComplete]);
 
 
   const handleAdd = () => {
@@ -105,6 +103,12 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
     if (!winner) return null;
     return users.find(u => u.id === winner.author);
   }, [winner, users]);
+
+  const spinButtonText = useMemo(() => {
+    if (isProcessingWin) return 'Обработка...';
+    if (isSpinning) return 'Крутится...';
+    return `Запустить рулетку (-5⚡️)`;
+  }, [isSpinning, isProcessingWin]);
 
   return (
     <div className="space-y-6">
@@ -135,7 +139,7 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
           <button
             onClick={handleAdd}
             className="w-full bg-tg-button text-tg-button-text font-bold py-3 rounded-lg hover:bg-blue-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
-            disabled={!newOption.trim() || currentUser.energy < 1 || isSpinning}
+            disabled={!newOption.trim() || currentUser.energy < 1 || isSpinning || isProcessingWin}
           >
             Добавить (-1⚡️)
           </button>
@@ -174,10 +178,10 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
       
       <button
         onClick={onSpinRequest}
-        disabled={isSpinning || options.length < 2 || currentUser.energy < 5}
+        disabled={isSpinning || isProcessingWin || options.length < 2 || currentUser.energy < 5}
         className="w-full bg-green-500 text-white font-bold text-lg py-4 rounded-xl hover:bg-green-600 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
       >
-        {isSpinning ? 'Крутится...' : `Запустить рулетку (-5⚡️)`}
+        {spinButtonText}
       </button>
     </div>
   );

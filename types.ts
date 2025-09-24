@@ -55,13 +55,7 @@ export enum AppView {
   PROFILES = 'PROFILES',
   HISTORY = 'HISTORY',
   REWARDS = 'REWARDS',
-}
-
-// Глобальное состояние для синхронизации
-export interface AppState extends BaseRecord {
-  roulette_status: 'idle' | 'spinning';
-  roulette_winner_id: string; // ID опции-победителя
-  roulette_spinning_by: string; // ID пользователя, запустившего рулетку
+  DUEL = 'DUEL',
 }
 
 // Награды в магазине
@@ -70,4 +64,12 @@ export interface Reward extends BaseRecord {
   description: string;
   cost: number;
   icon: string;
+}
+
+// Записи о покупках
+export interface Purchase extends BaseRecord {
+  user: string; // Relation to User ID
+  reward_name: string;
+  reward_icon: string;
+  cost: number;
 }
