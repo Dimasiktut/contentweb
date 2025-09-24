@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { User, Duel, DuelChoice } from '../types';
+import { User, Duel, DuelChoice, DuelStatus } from '../types';
 
 const CHOICES: Record<DuelChoice, { name: string; icon: string; beats: DuelChoice }> = {
   rock: { name: 'Камень', icon: '✊', beats: 'scissors' },
@@ -13,9 +13,10 @@ interface DuelViewProps {
   users: User[];
   onMakeChoice: (choice: DuelChoice) => void;
   onClose: () => void;
+  onCancel: () => void;
 }
 
-const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeChoice, onClose }) => {
+const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeChoice, onClose, onCancel }) => {
   const isChallenger = duel.challenger === currentUser.id;
   const opponentUser = users.find(u => u.id === (isChallenger ? duel.opponent : duel.challenger));
   
@@ -23,31 +24,43 @@ const DuelView: React.FC<DuelViewProps> = ({ currentUser, duel, users, onMakeCho
   const opponentChoice = isChallenger ? duel.opponent_choice : duel.challenger_choice;
 
   const getPlayerCardClass = (isWinner: boolean) => {
-    if (duel.status !== 'completed' || !duel.winner) return 'border-transparent';
+    if (duel.status !== DuelStatus.COMPLETED || !duel.winner) return 'border-transparent';
     return isWinner ? 'border-green-500' : 'border-red-500';
   };
   
   const resultText = useMemo(() => {
-    if (duel.status !== 'completed') return '';
+    if (duel.status !== DuelStatus.COMPLETED) {
+        if (duel.status === DuelStatus.DECLINED) return 'Дуэль отклонена';
+        if (duel.status === DuelStatus.CANCELLED) return 'Дуэль отменена';
+        return '';
+    };
     if (!duel.winner) return 'Ничья!';
     if (duel.winner === currentUser.id) return 'Вы победили!';
     return 'Вы проиграли';
   }, [duel, currentUser.id]);
 
   const renderContent = () => {
-    if (duel.status === 'pending') {
+    if (duel.status === DuelStatus.PENDING) {
       return (
         <div className="h-28 flex flex-col items-center justify-center animate-fade-in">
           <h2 className="text-xl font-semibold">Ожидание ответа...</h2>
           <p className="text-tg-hint">@{opponentUser?.username} должен принять вызов.</p>
+          {isChallenger && (
+            <button
+              onClick={onCancel}
+              className="mt-4 w-full bg-red-600 text-white font-bold py-2 rounded-lg hover:bg-red-700 transition"
+            >
+              Отменить вызов
+            </button>
+          )}
         </div>
       );
     }
 
-    if (duel.status === 'completed') {
+    if ([DuelStatus.COMPLETED, DuelStatus.DECLINED, DuelStatus.CANCELLED].includes(duel.status)) {
       return (
         <div className="h-28 flex flex-col items-center justify-center animate-fade-in">
-          <h2 className={`text-3xl font-bold mb-4 ${!duel.winner ? 'text-amber-400' : duel.winner === currentUser.id ? 'text-green-400' : 'text-red-400'}`}>
+          <h2 className={`text-3xl font-bold mb-4 ${!duel.winner && duel.status === 'completed' ? 'text-amber-400' : duel.winner === currentUser.id ? 'text-green-400' : (duel.status !== 'completed' ? 'text-tg-hint' : 'text-red-400')}`}>
             {resultText}
           </h2>
           <button
