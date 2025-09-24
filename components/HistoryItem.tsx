@@ -21,7 +21,7 @@ const HistoryItem: React.FC<HistoryItemProps> = ({ record, author }) => {
     <div className="bg-tg-secondary-bg p-4 rounded-xl shadow-md animate-slide-in-up">
       <div className="flex justify-between items-start">
         <p className="text-lg font-semibold text-tg-link break-words pr-4">
-          "{record.option.text}"
+          "{record.option_text}"
         </p>
         <span className="text-xs text-tg-hint flex-shrink-0">
           {formatDate(record.timestamp)}

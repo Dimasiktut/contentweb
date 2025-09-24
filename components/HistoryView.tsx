@@ -23,9 +23,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, users }) => {
   return (
     <div className="space-y-3 animate-fade-in">
       {history.map(record => {
-        const author = users.find(u => u.id === record.option.authorId);
+        const author = users.find(u => u.id === record.author);
         if (!author) return null;
-        return <HistoryItem key={record.timestamp} record={record} author={author} />;
+        return <HistoryItem key={record.id} record={record} author={author} />;
       })}
     </div>
   );

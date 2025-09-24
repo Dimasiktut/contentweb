@@ -1,11 +1,13 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
-import { db } from './firebase';
-import { collection, onSnapshot, doc, setDoc, addDoc, deleteDoc, query, orderBy, writeBatch, getDoc } from 'firebase/firestore';
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
 import HistoryView from './components/HistoryView';
 import { User, Option, AppView, AchievementId, WinRecord } from './types';
+// FIX: The original import of 'pocketbase' caused a module resolution conflict with a local file.
+// The PocketBase client instance is now initialized in and imported from `./pocketbase.ts` to resolve the issue.
+import { pb, type RecordSubscription } from './pocketbase';
 
 declare global {
   interface Window {
@@ -24,30 +26,28 @@ const App: React.FC = () => {
   // Инициализация Telegram и определение пользователя
   useEffect(() => {
     const initializeUser = async (tgUser: any) => {
-      const userRef = doc(db, 'users', tgUser.id.toString());
-      let userDoc = await getDoc(userRef);
-
-      if (!userDoc.exists()) {
-        const newUser: User = {
-          id: tgUser.id,
+      try {
+        const user = await pb.collection('users').getOne<User>(tgUser.id.toString());
+        const avatarUrl = tgUser.photo_url || user.avatarUrl;
+        if (avatarUrl !== user.avatarUrl) {
+            const updatedUser = await pb.collection('users').update<User>(user.id, { avatarUrl });
+            setCurrentUser(updatedUser);
+        } else {
+            setCurrentUser(user);
+        }
+      } catch (error) {
+        // User not found, create a new one
+        const newUser: Omit<User, 'id' | 'created' | 'updated' | 'collectionId' | 'collectionName'> = {
           username: tgUser.username || `${tgUser.first_name}_${tgUser.last_name || ''}`.toLowerCase(),
           avatarUrl: tgUser.photo_url || `https://picsum.photos/seed/${tgUser.id}/100/100`,
           role: 'Участник',
-          stats: { ideasProposed: 0, wins: 0, winStreak: 0 },
+          stats_ideasProposed: 0,
+          stats_wins: 0,
+          stats_winStreak: 0,
           achievements: [],
         };
-        await setDoc(userRef, newUser);
-        setCurrentUser(newUser);
-      } else {
-         const existingUser = userDoc.data() as User;
-         // Обновляем аватар, если он изменился в Telegram
-         if (tgUser.photo_url && existingUser.avatarUrl !== tgUser.photo_url) {
-            const updatedUser = { ...existingUser, avatarUrl: tgUser.photo_url };
-            await setDoc(userRef, updatedUser, { merge: true });
-            setCurrentUser(updatedUser);
-         } else {
-            setCurrentUser(existingUser);
-         }
+        const createdUser = await pb.collection('users').create<User>({ id: tgUser.id.toString(), ...newUser });
+        setCurrentUser(createdUser);
       }
       setIsLoading(false);
     };
@@ -60,100 +60,118 @@ const App: React.FC = () => {
       if (tgUser) {
         initializeUser(tgUser);
       } else {
-        // Fallback for development if no user is found
-        setIsLoading(false);
+        // For development outside Telegram, create a mock user
+        console.warn("Telegram user not found. Creating a mock user for development.");
+        initializeUser({ id: '123456789', username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
       }
     } else {
-      console.warn("Telegram Web App script not loaded. Running in development mode.");
-      setIsLoading(false);
+      console.warn("Telegram Web App script not loaded. Running in development mode with a mock user.");
+       initializeUser({ id: '123456789', username: 'dev_user', first_name: 'Dev', last_name: 'User', photo_url: `https://picsum.photos/seed/123456789/100/100` });
     }
   }, []);
 
-  // Real-time listeners for data from Firestore
+  // Real-time listeners for data from PocketBase
   useEffect(() => {
-    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
-      const usersData = snapshot.docs.map(doc => doc.data() as User);
-      setUsers(usersData);
-    });
+    // Initial fetch
+    pb.collection('users').getFullList<User>().then(setUsers);
+    pb.collection('options').getFullList<Option>().then(setOptions);
+    pb.collection('history').getFullList<WinRecord>({ sort: '-timestamp' }).then(setWinHistory);
 
-    const unsubscribeOptions = onSnapshot(collection(db, 'options'), (snapshot) => {
-      const optionsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Option));
-      setOptions(optionsData);
-    });
-
-    const historyQuery = query(collection(db, 'history'), orderBy('timestamp', 'desc'));
-    const unsubscribeHistory = onSnapshot(historyQuery, (snapshot) => {
-      const historyData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WinRecord));
-      setWinHistory(historyData);
-    });
-
+    // Subscriptions
+    const unsubscribers = [
+        pb.collection('users').subscribe('*', (e: RecordSubscription<User>) => {
+            setUsers(prev => {
+              const filtered = prev.filter(u => u.id !== e.record.id);
+              return e.action === 'delete' ? filtered : [...filtered, e.record];
+            });
+        }),
+        pb.collection('options').subscribe('*', (e: RecordSubscription<Option>) => {
+            setOptions(prev => {
+                if (e.action === 'delete') return prev.filter(o => o.id !== e.record.id);
+                if (e.action === 'create') return [...prev, e.record];
+                return prev.map(o => o.id === e.record.id ? e.record : o);
+            });
+        }),
+        pb.collection('history').subscribe('*', (e: RecordSubscription<WinRecord>) => {
+             setWinHistory(prev => [e.record, ...prev].sort((a,b) => b.timestamp - a.timestamp));
+        })
+    ];
+    
+    // Cleanup on unmount
     return () => {
-      unsubscribeUsers();
-      unsubscribeOptions();
-      unsubscribeHistory();
+        unsubscribers.forEach(unsub => unsub());
     };
-  }, []);
+}, []);
+
 
   const handleAddOption = useCallback(async (text: string, category: string) => {
     if (!currentUser) return;
     const newOption = {
       text,
       category,
-      authorId: currentUser.id,
+      author: currentUser.id,
     };
-    await addDoc(collection(db, 'options'), newOption);
+    await pb.collection('options').create(newOption);
 
     // Update user's proposed ideas count
-    const userRef = doc(db, 'users', currentUser.id.toString());
-    const userDoc = await getDoc(userRef);
-    if (userDoc.exists()) {
-      const userData = userDoc.data() as User;
-      const newStats = { ...userData.stats, ideasProposed: userData.stats.ideasProposed + 1 };
-      await setDoc(userRef, { stats: newStats }, { merge: true });
-    }
+    await pb.collection('users').update(currentUser.id, {
+        'stats_ideasProposed+': 1
+    });
   }, [currentUser]);
 
   const handleRemoveOption = useCallback(async (idToRemove: string) => {
-    await deleteDoc(doc(db, 'options', idToRemove));
+    await pb.collection('options').delete(idToRemove);
   }, []);
 
   const handleWin = useCallback(async (winnerOption: Option) => {
-    const batch = writeBatch(db);
-
     // 1. Add to win history
-    const historyRef = doc(collection(db, 'history'));
-    batch.set(historyRef, { option: { ...winnerOption, id: 'ref' }, timestamp: Date.now() });
+    await pb.collection('history').create({
+        option_text: winnerOption.text,
+        option_category: winnerOption.category,
+        author: winnerOption.author,
+        timestamp: Date.now()
+    });
 
     // 2. Update stats for all users
-    users.forEach(user => {
-        const userRef = doc(db, 'users', user.id.toString());
-        if (user.id === winnerOption.authorId) {
-            const newWinStreak = user.stats.winStreak + 1;
+    const allUsers = await pb.collection('users').getFullList<User>();
+    for (const user of allUsers) {
+        if (user.id === winnerOption.author) {
+            const newWinStreak = user.stats_winStreak + 1;
             const newAchievements = [...user.achievements];
             if (newWinStreak >= 3 && !newAchievements.includes(AchievementId.LUCKY)) {
                 newAchievements.push(AchievementId.LUCKY);
             }
-            batch.update(userRef, {
-                'stats.wins': user.stats.wins + 1,
-                'stats.winStreak': newWinStreak,
+            await pb.collection('users').update(user.id, {
+                'stats_wins+': 1,
+                'stats_winStreak': newWinStreak,
                 'achievements': newAchievements
             });
         } else {
-             if (user.stats.winStreak > 0) {
-                batch.update(userRef, { 'stats.winStreak': 0 });
+             if (user.stats_winStreak > 0) {
+                await pb.collection('users').update(user.id, { 'stats_winStreak': 0 });
             }
         }
-    });
+    }
+  }, []);
 
-    await batch.commit();
-  }, [users]);
-
-  if (isLoading || !currentUser) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-tg-bg flex items-center justify-center">
         <div className="text-center">
           <div className="text-4xl animate-spin mb-4">⚙️</div>
-          <p className="text-lg text-tg-hint animate-pulse">Подключаемся к Firebase...</p>
+          <p className="text-lg text-tg-hint animate-pulse">Подключаемся к PocketBase...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!currentUser && !isLoading) {
+     return (
+      <div className="min-h-screen bg-tg-bg flex items-center justify-center">
+        <div className="text-center p-4">
+          <div className="text-4xl mb-4">🤔</div>
+          <h2 className="text-xl font-bold text-tg-text mb-2">Не удалось определить пользователя</h2>
+          <p className="text-lg text-tg-hint">Пожалуйста, откройте приложение через Telegram. Вне Telegram, мы не можем вас идентифицировать.</p>
         </div>
       </div>
     );
@@ -164,7 +182,7 @@ const App: React.FC = () => {
       <div className="max-w-md mx-auto">
         <Header currentView={view} setView={setView} />
         <main className="mt-4">
-          {view === AppView.ROULETTE && (
+          {view === AppView.ROULETTE && currentUser && (
             <Roulette
               options={options}
               users={users}
@@ -174,7 +192,7 @@ const App: React.FC = () => {
               currentUser={currentUser}
             />
           )}
-          {view === AppView.PROFILES && <ProfileView users={users} winHistory={winHistory} currentUser={currentUser} />}
+          {view === AppView.PROFILES && currentUser && <ProfileView users={users} winHistory={winHistory} currentUser={currentUser} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
         </main>
       </div>

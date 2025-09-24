@@ -1,5 +1,14 @@
 import { ReactElement } from 'react';
 
+// Базовый интерфейс для всех записей PocketBase
+export interface BaseRecord {
+  id: string;
+  created: string;
+  updated: string;
+  collectionId: string;
+  collectionName: string;
+}
+
 export enum AchievementId {
   IDEOLOGUE = 'IDEOLOGUE',
   FOODMAKER = 'FOODMAKER',
@@ -14,29 +23,27 @@ export interface Achievement {
   icon: ReactElement;
 }
 
-export interface User {
-  id: number;
+export interface User extends BaseRecord {
+  // id унаследован от tg
   username: string;
   avatarUrl: string;
   role: string;
-  stats: {
-    ideasProposed: number;
-    wins: number;
-    winStreak: number;
-  };
+  stats_ideasProposed: number;
+  stats_wins: number;
+  stats_winStreak: number;
   achievements: AchievementId[];
 }
 
-export interface Option {
-  id: string; // Changed from number to string for Firestore compatibility
+export interface Option extends BaseRecord {
   text: string;
   category: string;
-  authorId: number;
+  author: string; // Relation to User ID
 }
 
-export interface WinRecord {
-  id?: string; // Optional Firestore ID
-  option: Option;
+export interface WinRecord extends BaseRecord {
+  option_text: string;
+  option_category: string;
+  author: string; // Relation to User ID
   timestamp: number;
 }
 

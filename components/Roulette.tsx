@@ -95,12 +95,17 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
     }
   }
 
+  const winnerAuthor = useMemo(() => {
+    if (!winner) return null;
+    return users.find(u => u.id === winner.author);
+  }, [winner, users]);
+
   return (
     <div className="space-y-6">
-       {winner && (
+       {winner && winnerAuthor && (
         <WinnerModal 
           winner={winner} 
-          author={users.find(u => u.id === winner.authorId)!} 
+          author={winnerAuthor} 
           onClose={handleCloseModal} 
         />
       )}
@@ -137,7 +142,7 @@ const Roulette: React.FC<RouletteProps> = ({ options, users, onAddOption, onRemo
              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-16 bg-tg-link/20 border-y-2 border-tg-link rounded-lg z-10 pointer-events-none"></div>
              <div ref={listRef} className="will-change-transform">
                 {(isSpinning ? repeatedOptions : options).map((option, index) => {
-                    const author = users.find(u => u.id === option.authorId);
+                    const author = users.find(u => u.id === option.author);
                     return (
                         <div key={`${option.id}-${index}`} className="flex items-center space-x-4 p-2 bg-tg-bg rounded-lg mb-2 h-16">
                              <img src={author?.avatarUrl} alt={author?.username} className="w-10 h-10 rounded-full flex-shrink-0 object-cover" />
