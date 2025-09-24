@@ -9,6 +9,13 @@ export interface BaseRecord {
   collectionName: string;
 }
 
+// FIX: Define RecordSubscription locally to fix import error from pocketbase library.
+// This is likely due to a version mismatch or an issue with the package export map.
+export interface RecordSubscription<T = any> {
+  action: 'create' | 'update' | 'delete';
+  record: T;
+}
+
 export enum AchievementId {
   IDEOLOGUE = 'IDEOLOGUE',
   FOODMAKER = 'FOODMAKER',

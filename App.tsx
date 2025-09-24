@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-// FIX: Removed import to prevent module resolution conflict with local `pocketbase.ts` file.
-// import type { RecordSubscription } from 'pocketbase';
+// FIX: Removed import of RecordSubscription from 'pocketbase' as it was causing an error. The type is now imported from the local types.ts file.
 import Header from './components/Header';
 import Roulette from './components/Roulette';
 import ProfileView from './components/ProfileView';
@@ -10,14 +9,8 @@ import DuelView from './components/DuelView';
 import GamesView from './components/DuelsView';
 import GuideView from './components/GuideView';
 import ChessView from './components/ChessView';
-import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus } from './types';
+import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription } from './types';
 import { pb } from './pocketbase';
-
-// FIX: Added local type definition for RecordSubscription to replace the removed import.
-interface RecordSubscription<T = any> {
-  action: string;
-  record: T;
-}
 
 declare global {
   interface Window {
@@ -34,6 +27,26 @@ const CHOICES: Record<DuelChoice, { name: string; icon: string; beats: DuelChoic
   paper: { name: 'Бумага', icon: '✋', beats: 'rock' },
   scissors: { name: 'Ножницы', icon: '✌️', beats: 'paper' },
 };
+
+// Helper function to extract a detailed error message from a PocketBase error object.
+const getPocketbaseError = (err: any, defaultMessage: string = "Произошла неизвестная ошибка."): string => {
+  if (err && typeof err === 'object') {
+    // PocketBase ClientResponseError structure
+    if (err.data && typeof err.data === 'object' && err.data.message) {
+      return err.data.message;
+    }
+    // Some errors wrap the original error
+    if (err.originalError && typeof err.originalError === 'object' && err.originalError.message) {
+       return err.originalError.message;
+    }
+    // Fallback to the top-level message property
+    if (err.message) {
+      return err.message;
+    }
+  }
+  return defaultMessage;
+};
+
 
 // Helper function to check if it's a new day
 const needsEnergyUpdate = (lastUpdateDate: string | null): boolean => {
@@ -136,7 +149,7 @@ const App: React.FC = () => {
             stats_winStreak: 0,
             achievements: [],
             energy: 10,
-            points: 0,
+            points: 50,
             last_energy_update: new Date().toISOString(),
           };
 
@@ -160,7 +173,7 @@ const App: React.FC = () => {
       } catch (error: any)
       {
         console.error("Critical error during user initialization:", error);
-        const pbError = error.originalError?.data?.message || error.message || "Произошла неизвестная ошибка.";
+        const pbError = getPocketbaseError(error);
         setInitError(`Не удалось создать или загрузить профиль. (${pbError})`);
       } finally {
         setIsLoading(false);
@@ -192,6 +205,9 @@ const App: React.FC = () => {
     let unsubscribers: (() => void)[] = [];
 
     const setupSubscriptions = async () => {
+        // Force unsubscribe from all existing subscriptions before re-subscribing.
+        // This helps to prevent "Missing or invalid client id" errors on connection loss or server restart.
+        pb.realtime.unsubscribe();
         try {
             const [usersRes, optionsRes, historyRes, rewardsRes, duelHistoryRes, pendingDuelsRes, chessHistoryRes, pendingChessGamesRes] = await Promise.all([
                 pb.collection('users').getFullList<User>({ requestKey: null }),
@@ -218,7 +234,7 @@ const App: React.FC = () => {
                 setPurchases(purchasesRes);
             } catch (purchaseError: any) {
                 console.error("Failed to fetch purchases:", purchaseError);
-                setDataErrors(prev => [...prev, "Не удалось загрузить историю покупок."]);
+                setDataErrors(prev => [...prev, `Не удалось загрузить историю покупок: ${getPocketbaseError(purchaseError)}`]);
                 setPurchases([]);
             }
             
@@ -248,7 +264,7 @@ const App: React.FC = () => {
 
         } catch (err: any) {
             console.error("Error fetching initial data:", err);
-            setDataErrors(prev => [...prev, err.message || "Не удалось загрузить основные данные."]);
+            setDataErrors(prev => [...prev, getPocketbaseError(err, "Не удалось загрузить основные данные.")]);
             setUsers([]); setOptions([]); setWinHistory([]); setRewards([]); setPurchases([]); setDuelHistory([]); setPendingDuels([]); setChessHistory([]); setPendingChessGames([]);
         }
 
@@ -345,7 +361,6 @@ const App: React.FC = () => {
     
     return () => {
         unsubscribers.forEach(unsub => unsub());
-        pb.autoCancellation(true);
     };
 }, [currentUser, activeDuel, activeChessGame]);
 
