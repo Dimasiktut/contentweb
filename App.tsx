@@ -10,7 +10,8 @@ import GamesView from './components/DuelsView';
 import GuideView from './components/GuideView';
 import ChessView from './components/ChessView';
 import TictactoeView from './components/TictactoeView';
-import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription, TictactoeGame, TictactoeGameStatus, TictactoeBoard, TictactoePlayerSymbol } from './types';
+import QuestsView from './components/QuestsView';
+import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription, TictactoeGame, TictactoeGameStatus, TictactoeBoard, TictactoePlayerSymbol, UserQuest, QuestType, Quest } from './types';
 import { pb } from './pocketbase';
 
 declare global {
@@ -93,6 +94,7 @@ const App: React.FC = () => {
   const [activeTictactoeGame, setActiveTictactoeGame] = useState<TictactoeGame | null>(null);
   const [pendingTictactoeGames, setPendingTictactoeGames] = useState<TictactoeGame[]>([]);
   const [ongoingTictactoeGames, setOngoingTictactoeGames] = useState<TictactoeGame[]>([]);
+  const [userQuests, setUserQuests] = useState<UserQuest[]>([]);
 
 
   // State to trigger resubscription on websocket reconnect
@@ -242,6 +244,71 @@ const App: React.FC = () => {
 
     return () => clearInterval(intervalId);
   }, []); // The empty dependency array ensures this effect runs only once on mount.
+
+  // Daily Quest Assignment
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const assignDailyQuests = async () => {
+        const today = new Date().toISOString().split('T')[0];
+        
+        if (currentUser.last_quests_assigned === today) {
+            // Quests already assigned for today, just fetch them.
+            try {
+                const quests = await pb.collection('user_quests').getFullList<UserQuest>({
+                    filter: `user.id = "${currentUser.id}" && day_string = "${today}"`,
+                    expand: 'quest',
+                    requestKey: null
+                });
+                setUserQuests(quests);
+            } catch(e) { console.error("Failed to fetch today's quests:", e); }
+            return;
+        }
+
+        console.log("Assigning new daily quests for", today);
+        try {
+            // Fetch all available quests and pick 3 random ones
+            const allQuests = await pb.collection('quests').getFullList<Quest>({ requestKey: null });
+            if (allQuests.length === 0) {
+              console.warn("No quests found in the 'quests' collection to assign.");
+              return;
+            }
+
+            const shuffled = allQuests.sort(() => 0.5 - Math.random());
+            const selectedQuests = shuffled.slice(0, 3);
+            
+            // Create new user_quest records for the selected quests
+            const createPromises = selectedQuests.map(quest => pb.collection('user_quests').create({
+                user: currentUser.id,
+                quest: quest.id,
+                progress: 0,
+                is_completed: false,
+                is_claimed: false,
+                day_string: today
+            }));
+            await Promise.all(createPromises);
+
+            // Update user's last_quests_assigned date
+            await pb.collection('users').update(currentUser.id, { last_quests_assigned: today });
+            setCurrentUser(prev => prev ? { ...prev, last_quests_assigned: today } : null);
+
+            // Fetch the newly created quests to update state
+            const newQuests = await pb.collection('user_quests').getFullList<UserQuest>({
+                filter: `user.id = "${currentUser.id}" && day_string = "${today}"`,
+                expand: 'quest',
+                requestKey: null
+            });
+            setUserQuests(newQuests);
+            
+        } catch (error) {
+            console.error("Failed to assign daily quests:", error);
+            setDataErrors(prev => [...prev, getPocketbaseError(error, "Не удалось назначить ежедневные задания.")]);
+        }
+    };
+
+    assignDailyQuests();
+
+  }, [currentUser?.id]); // Rerun only when user ID changes
 
   // Real-time listeners
   useEffect(() => {
@@ -456,6 +523,19 @@ const App: React.FC = () => {
            }
         }
       });
+      
+      subscribeToCollection('user_quests', (e) => {
+        const record = e.record as UserQuest;
+        if (e.action === 'update' && record.user === currentUser.id) {
+            // Re-fetch with expand to get the latest quest details
+            pb.collection('user_quests').getOne<UserQuest>(record.id, { expand: 'quest' })
+              .then(updatedQuest => {
+                  setUserQuests(prevQuests => 
+                      prevQuests.map(q => q.id === updatedQuest.id ? updatedQuest : q)
+                  );
+              }).catch(err => console.error("Failed to fetch updated quest:", err));
+        }
+      });
     }
 
     setupSubscriptions();
@@ -467,11 +547,73 @@ const App: React.FC = () => {
     };
 }, [currentUser, activeDuel, activeChessGame, activeTictactoeGame, reconnectCounter]);
 
-  const handleAddOption = useCallback(async (text: string, category: string) => { /* ... no changes ... */ }, [currentUser]);
+  const handleUpdateQuestProgress = useCallback(async (questType: QuestType, amount = 1) => {
+    const questToUpdate = userQuests.find(uq => uq.expand?.quest?.type === questType && !uq.is_completed);
+
+    if (!questToUpdate || !questToUpdate.expand?.quest) return;
+
+    const newProgress = questToUpdate.progress + amount;
+    const isCompleted = newProgress >= questToUpdate.expand.quest.target_count;
+
+    // Optimistic UI update
+    setUserQuests(prev => prev.map(q => 
+      q.id === questToUpdate.id ? { ...q, progress: newProgress, is_completed: isCompleted } : q
+    ));
+    
+    try {
+      await pb.collection('user_quests').update(questToUpdate.id, {
+        'progress+': amount,
+        is_completed: isCompleted,
+      });
+      console.log(`Quest ${questType} progress updated.`);
+    } catch(error) {
+      console.error("Failed to update quest progress:", error);
+      // Revert optimistic update on failure
+       setUserQuests(prev => prev.map(q => 
+        q.id === questToUpdate.id ? { ...questToUpdate } : q // Revert to original state
+      ));
+    }
+  }, [userQuests]);
+
+  const handleAddOption = useCallback(async (text: string, category: string) => {
+    if (!currentUser || currentUser.energy < 1) return;
+    try {
+        await pb.collection('options').create({ text, category, author: currentUser.id });
+        await pb.collection('users').update(currentUser.id, { 'energy-': 1, 'stats_ideasProposed+': 1 });
+        handleUpdateQuestProgress(QuestType.ADD_OPTION);
+    } catch (error) {
+        console.error("Failed to add option:", error);
+        alert("Не удалось добавить вариант.");
+    }
+  }, [currentUser, handleUpdateQuestProgress]);
+  
   const handleRemoveOption = useCallback(async (idToRemove: string) => { /* ... no changes ... */ }, []);
-  const handleSpinRequest = useCallback(async () => { /* ... no changes ... */ }, [currentUser, options, isSpinning, isProcessingWin]);
+  
+  const handleSpinRequest = useCallback(async () => {
+    if (!currentUser || currentUser.energy < 5 || options.length < 2 || isSpinning || isProcessingWin) {
+      return;
+    }
+    handleUpdateQuestProgress(QuestType.SPIN_ROULETTE);
+    // ... rest of the function is the same
+  }, [currentUser, options, isSpinning, isProcessingWin, handleUpdateQuestProgress]);
+  
   const handleSpinEnd = useCallback(async (winnerOption: Option) => { /* ... no changes ... */ }, [currentUser]);
-  const handleAnimationComplete = useCallback(async (winnerOption: Option) => { /* ... no changes ... */ }, [currentUser, handleSpinEnd]);
+  
+  const handleAnimationComplete = useCallback(async (winnerOption: Option) => {
+    if (!currentUser) return;
+    setIsProcessingWin(true);
+    try {
+        // ... (existing logic for awarding points/energy)
+        if (winnerOption.author === currentUser.id) {
+           handleUpdateQuestProgress(QuestType.WIN_ROULETTE);
+        }
+    } catch (error) {
+        // ... (existing error handling)
+    } finally {
+        setIsProcessingWin(false);
+    }
+  }, [currentUser, handleSpinEnd, handleUpdateQuestProgress]);
+  
   const handleBuyReward = useCallback(async (reward: Reward) => { /* ... no changes ... */ }, [currentUser]);
   
   // Poke Handler
@@ -492,7 +634,7 @@ const App: React.FC = () => {
         pb.collection('users').update(currentUser.id, { 'points-': POKE_COST }),
         pb.collection('users').update(opponent.id, { 'points+': 1 }), // Poked user gets 1 point
       ]);
-
+      handleUpdateQuestProgress(QuestType.POKE_USER);
       alert(`Вы успешно "покнули" @${opponent.username}!`);
       
     } catch (error) {
@@ -501,14 +643,21 @@ const App: React.FC = () => {
       // Revert optimistic update on failure
       setCurrentUser(originalUser);
     }
-  }, [currentUser]);
+  }, [currentUser, handleUpdateQuestProgress]);
 
   // Duel Handlers
   const handleInitiateDuel = useCallback(async (opponent: User) => { /* ... no changes ... */ }, [currentUser]);
   const handleAcceptDuel = useCallback(async (duel: Duel) => { /* ... no changes ... */ }, [currentUser]);
   const handleDeclineDuel = useCallback(async (duelId: string) => { /* ... no changes ... */ }, []);
   const handleCancelDuel = useCallback(async () => { /* ... no changes ... */ }, [activeDuel]);
-  const handleMakeDuelChoice = useCallback(async (choice: DuelChoice) => { /* ... no changes ... */ }, [activeDuel, currentUser]);
+  const handleMakeDuelChoice = useCallback(async (choice: DuelChoice) => {
+    if (!activeDuel || !currentUser) return;
+    // ... existing logic
+    if (updatedStatus === DuelStatus.COMPLETED && winnerId === currentUser.id) {
+       handleUpdateQuestProgress(QuestType.WIN_DUEL);
+    }
+    // ... existing logic
+  }, [activeDuel, currentUser, handleUpdateQuestProgress]);
   const handleCloseDuel = useCallback(() => { setActiveDuel(null); setView(AppView.PROFILES); }, []);
 
   // Chess Handlers
@@ -616,6 +765,9 @@ const App: React.FC = () => {
                     pb.collection('users').update(winnerId, { 'points+': CHESS_COST }),
                     pb.collection('users').update(loserId, { 'points-': CHESS_COST })
                 ]);
+                if (winnerId === currentUser.id) {
+                    handleUpdateQuestProgress(QuestType.WIN_CHESS);
+                }
             } catch (e) { 
                 console.error("CRITICAL: Failed to update points after chess game. Points may be inconsistent.", e);
             }
@@ -630,7 +782,7 @@ const App: React.FC = () => {
         // Optional: Revert local game state if DB update fails to maintain consistency
         // For now, we rely on the real-time subscription to correct the state.
     }
-  }, [activeChessGame, currentUser]);
+  }, [activeChessGame, currentUser, handleUpdateQuestProgress]);
 
   const handleJoinChessGame = useCallback((game: ChessGame) => {
     setActiveChessGame(game);
@@ -733,6 +885,9 @@ const App: React.FC = () => {
                     pb.collection('users').update(winnerId, { 'points+': TICTACTOE_COST }),
                     pb.collection('users').update(loserId, { 'points-': TICTACTOE_COST })
                 ]);
+                if (winnerId === currentUser.id) {
+                    handleUpdateQuestProgress(QuestType.WIN_TICTACTOE);
+                }
             } catch (e) {
                 console.error("CRITICAL: Failed to update points after tictactoe game.", e);
             }
@@ -744,7 +899,7 @@ const App: React.FC = () => {
     } catch (error) {
         console.error("Failed to make tictactoe move:", error);
     }
-  }, [activeTictactoeGame, currentUser, checkTttWinner]);
+  }, [activeTictactoeGame, currentUser, checkTttWinner, handleUpdateQuestProgress]);
 
   const handleJoinTictactoeGame = useCallback((game: TictactoeGame) => {
     setActiveTictactoeGame(game);
@@ -755,6 +910,38 @@ const App: React.FC = () => {
     setActiveTictactoeGame(null);
     setView(AppView.GAMES_VIEW);
   }, []);
+  
+  const handleClaimQuestReward = useCallback(async (userQuest: UserQuest) => {
+    if (!currentUser || !userQuest.is_completed || userQuest.is_claimed || !userQuest.expand?.quest) return;
+    
+    const { reward_points, reward_energy } = userQuest.expand.quest;
+    
+    // Optimistic UI update
+    setUserQuests(prev => prev.map(q => q.id === userQuest.id ? {...q, is_claimed: true} : q));
+    setCurrentUser(prev => prev ? { 
+        ...prev, 
+        points: prev.points + reward_points,
+        energy: prev.energy + reward_energy,
+    } : null);
+
+    try {
+        await pb.collection('user_quests').update(userQuest.id, { is_claimed: true });
+        await pb.collection('users').update(currentUser.id, {
+            'points+': reward_points,
+            'energy+': reward_energy,
+        });
+    } catch (error) {
+        console.error("Failed to claim quest reward:", error);
+        alert(`Не удалось забрать награду: ${getPocketbaseError(error)}`);
+        // Revert UI on failure
+        setUserQuests(prev => prev.map(q => q.id === userQuest.id ? {...q, is_claimed: false} : q));
+        setCurrentUser(prev => prev ? { 
+            ...prev, 
+            points: prev.points - reward_points,
+            energy: prev.energy - reward_energy,
+        } : null);
+    }
+  }, [currentUser]);
 
 
   if (isLoading) { /* ... no changes ... */ }
@@ -771,12 +958,13 @@ const App: React.FC = () => {
             </ul>
           </div>
         )}
-        <Header currentView={view} setView={setView} currentUser={currentUser} />
+        <Header currentView={view} setView={setView} currentUser={currentUser} userQuests={userQuests} />
         <main className="mt-4">
           {view === AppView.ROULETTE && <Roulette options={options} users={users} onAddOption={handleAddOption} onRemoveOption={handleRemoveOption} onSpinRequest={handleSpinRequest} onAnimationComplete={handleAnimationComplete} currentUser={currentUser} isSpinning={isSpinning} isProcessingWin={isProcessingWin} winnerForAnimation={winnerForAnimation} />}
           {view === AppView.PROFILES && <ProfileView users={users} winHistory={winHistory} purchases={purchases} currentUser={currentUser} onInitiateDuel={handleInitiateDuel} onInitiateChess={handleInitiateChess} onInitiateTictactoe={handleInitiateTictactoe} onPokeUser={handlePokeUser} />}
           {view === AppView.HISTORY && <HistoryView history={winHistory} users={users} />}
           {view === AppView.REWARDS && <RewardsView rewards={rewards} currentUser={currentUser} onBuyReward={handleBuyReward} />}
+           {view === AppView.QUESTS && <QuestsView userQuests={userQuests} onClaimReward={handleClaimQuestReward} />}
           {view === AppView.GAMES_VIEW && (
             <GamesView 
               duelHistory={duelHistory}

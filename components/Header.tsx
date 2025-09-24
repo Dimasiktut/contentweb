@@ -1,13 +1,14 @@
-import React from 'react';
-import { AppView, User } from '../types';
+import React, { useMemo } from 'react';
+import { AppView, User, UserQuest } from '../types';
 
 interface HeaderProps {
   currentView: AppView;
   setView: (view: AppView) => void;
   currentUser: User | null;
+  userQuests: UserQuest[];
 }
 
-const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) => {
+const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser, userQuests }) => {
   const getButtonClass = (view: AppView) => {
     return `w-full py-2.5 text-xs font-bold rounded-lg transition-colors duration-300 ${
       currentView === view
@@ -15,10 +16,14 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
         : 'bg-tg-secondary-bg text-tg-hint hover:bg-gray-700'
     }`;
   };
+  
+  const hasClaimableQuests = useMemo(() => {
+    return userQuests.some(q => q.is_completed && !q.is_claimed);
+  }, [userQuests]);
 
   return (
     <header className="bg-tg-secondary-bg p-2 rounded-xl shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-y-3 gap-x-4">
-      <div className="grid grid-cols-3 gap-2 flex-grow">
+      <div className="grid grid-cols-4 gap-2 flex-grow">
         <button onClick={() => setView(AppView.ROULETTE)} className={getButtonClass(AppView.ROULETTE)}>
           Рулетка
         </button>
@@ -27,6 +32,10 @@ const Header: React.FC<HeaderProps> = ({ currentView, setView, currentUser }) =>
         </button>
         <button onClick={() => setView(AppView.GAMES_VIEW)} className={getButtonClass(AppView.GAMES_VIEW)}>
           Игры
+        </button>
+        <button onClick={() => setView(AppView.QUESTS)} className={`${getButtonClass(AppView.QUESTS)} relative`}>
+          Задания
+           {hasClaimableQuests && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-green-400 rounded-full border-2 border-tg-secondary-bg animate-pulse"></span>}
         </button>
          <button onClick={() => setView(AppView.REWARDS)} className={getButtonClass(AppView.REWARDS)}>
           Магазин

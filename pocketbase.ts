@@ -1,5 +1,5 @@
 // FIX: Changed to a named import for `PocketBase` to resolve the "no default export" error.
-import PocketBase from 'pocketbase';
+import { PocketBase } from 'pocketbase';
 
 const POCKETBASE_URL = 'https://pocketbase-production-63f9.up.railway.app';
 

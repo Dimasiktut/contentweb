@@ -42,6 +42,7 @@ export interface User extends BaseRecord {
   energy: number;
   points: number;
   last_energy_update: string;
+  last_quests_assigned?: string; // Date string 'YYYY-MM-DD'
 }
 
 export interface Option extends BaseRecord {
@@ -67,6 +68,7 @@ export enum AppView {
   GUIDE = 'GUIDE',
   CHESS = 'CHESS',
   TICTACTOE = 'TICTACTOE',
+  QUESTS = 'QUESTS',
 }
 
 // Награды в магазине
@@ -166,4 +168,36 @@ export interface TictactoeGame extends BaseRecord {
     player_o?: User;
     winner?: User;
   };
+}
+
+// Типы для заданий
+export enum QuestType {
+    ADD_OPTION = 'ADD_OPTION',
+    SPIN_ROULETTE = 'SPIN_ROULETTE',
+    WIN_ROULETTE = 'WIN_ROULETTE',
+    WIN_DUEL = 'WIN_DUEL',
+    WIN_CHESS = 'WIN_CHESS',
+    WIN_TICTACTOE = 'WIN_TICTACTOE',
+    POKE_USER = 'POKE_USER',
+}
+
+export interface Quest extends BaseRecord {
+    title: string;
+    description: string;
+    type: QuestType;
+    target_count: number;
+    reward_points: number;
+    reward_energy: number;
+}
+
+export interface UserQuest extends BaseRecord {
+    user: string; // User ID
+    quest: string; // Quest ID
+    progress: number;
+    is_completed: boolean;
+    is_claimed: boolean;
+    day_string: string; // 'YYYY-MM-DD'
+    expand?: {
+        quest?: Quest;
+    };
 }
