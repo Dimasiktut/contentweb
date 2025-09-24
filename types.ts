@@ -56,8 +56,9 @@ export enum AppView {
   HISTORY = 'HISTORY',
   REWARDS = 'REWARDS',
   DUEL = 'DUEL',
-  DUELS_VIEW = 'DUELS_VIEW',
+  GAMES_VIEW = 'GAMES_VIEW',
   GUIDE = 'GUIDE',
+  CHESS = 'CHESS',
 }
 
 // Награды в магазине
@@ -98,4 +99,26 @@ export interface Duel extends BaseRecord {
   challenger_choice?: DuelChoice;
   opponent_choice?: DuelChoice;
   winner?: string; // User ID
+}
+
+// Типы для шахмат
+export enum ChessGameStatus {
+  PENDING = 'pending',
+  ONGOING = 'ongoing',
+  COMPLETED = 'completed',
+  CANCELLED = 'cancelled',
+  DECLINED = 'declined',
+}
+
+export type ChessPlayerColor = 'w' | 'b';
+
+export interface ChessGame extends BaseRecord {
+  player_white: string; // User ID
+  player_black: string; // User ID
+  stake: number;
+  status: ChessGameStatus;
+  fen: string; // Forsyth-Edwards Notation for board state
+  turn: ChessPlayerColor;
+  winner?: string; // User ID
+  pgn: string; // Portable Game Notation for move history
 }

@@ -9,11 +9,13 @@ interface ProfileCardProps {
   isCurrentUser: boolean;
   currentUser: User;
   onInitiateDuel: (opponent: User) => void;
+  onInitiateChess: (opponent: User) => void;
 }
 
 const DUEL_COST = 10;
+const CHESS_COST = 25;
 
-const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, isCurrentUser, currentUser, onInitiateDuel }) => {
+const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, isCurrentUser, currentUser, onInitiateDuel, onInitiateChess }) => {
   const getFavoriteCategory = (): string => {
     const userWins = winHistory.filter(win => win.author === user.id);
     if (userWins.length === 0) {
@@ -68,13 +70,20 @@ const ProfileCard: React.FC<ProfileCardProps> = ({ user, winHistory, purchases, 
       </div>
       
       {!isCurrentUser && (
-        <div className="mt-5">
+        <div className="mt-5 grid grid-cols-2 gap-2">
           <button
             onClick={() => onInitiateDuel(user)}
             disabled={(currentUser.points || 0) < DUEL_COST || (user.points || 0) < DUEL_COST}
             className="w-full bg-red-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-red-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
           >
             Дуэль (-{DUEL_COST} 🪙)
+          </button>
+          <button
+            onClick={() => onInitiateChess(user)}
+            disabled={(currentUser.points || 0) < CHESS_COST || (user.points || 0) < CHESS_COST}
+            className="w-full bg-blue-600/80 text-white font-bold py-2.5 rounded-lg hover:bg-blue-700 transition-all duration-300 transform hover:scale-105 disabled:bg-gray-500 disabled:scale-100 disabled:cursor-not-allowed"
+          >
+            Шахматы (-{CHESS_COST} 🪙)
           </button>
         </div>
       )}
