@@ -135,11 +135,10 @@ const QuestsView: React.FC<QuestsViewProps> = ({ userQuests, onClaimReward }) =>
                                     <button
                                         onClick={() => onClaimReward(uq)}
                                         disabled={!isClaimable}
-                                        className="mt-2 w-full text-sm font-bold py-2 px-3 rounded-lg transition-colors duration-300 disabled:cursor-not-allowed
+                                        className={`mt-2 w-full text-sm font-bold py-2 px-3 rounded-lg transition-colors duration-300 disabled:cursor-not-allowed
                                           ${isClaimable ? 'bg-green-600 hover:bg-green-700 text-white' 
                                             : uq.is_claimed ? 'bg-gray-700 text-gray-400' 
-                                            : 'bg-gray-600 text-gray-400'}`
-                                        }
+                                            : 'bg-gray-600 text-gray-400'}`}
                                     >
                                         {uq.is_claimed ? 'Выполнено' : isClaimable ? 'Забрать' : 'В процессе'}
                                     </button>
