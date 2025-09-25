@@ -75,7 +75,7 @@ const CountdownTimer: React.FC = () => {
     return <span className="font-mono">{timeLeft}</span>;
 };
 
-export const QuestsView: React.FC<QuestsViewProps> = ({ userQuests, onClaimReward }) => {
+const QuestsView: React.FC<QuestsViewProps> = ({ userQuests, onClaimReward }) => {
 
     if (userQuests.length === 0) {
         return (
@@ -152,3 +152,5 @@ export const QuestsView: React.FC<QuestsViewProps> = ({ userQuests, onClaimRewar
         </div>
     );
 };
+
+export default QuestsView;

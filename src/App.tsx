@@ -10,7 +10,7 @@ import GamesView from './components/DuelsView';
 import GuideView from './components/GuideView';
 import ChessView from './components/ChessView';
 import TictactoeView from './components/TictactoeView';
-import { QuestsView } from './components/QuestsView';
+import QuestsView from './components/QuestsView';
 import { User, Option, AppView, AchievementId, WinRecord, Reward, Purchase, Duel, DuelStatus, DuelChoice, ChessGame, ChessGameStatus, RecordSubscription, TictactoeGame, TictactoeGameStatus, TictactoeBoard, TictactoePlayerSymbol, UserQuest, QuestType, Quest } from './types';
 import { pb } from './pocketbase';
 
@@ -593,26 +593,69 @@ const App: React.FC = () => {
     if (!currentUser || currentUser.energy < 5 || options.length < 2 || isSpinning || isProcessingWin) {
       return;
     }
-    handleUpdateQuestProgress(QuestType.SPIN_ROULETTE);
-    // ... rest of the function is the same
+    
+    setIsSpinning(true);
+    try {
+      // Deduct energy before spinning
+      await pb.collection('users').update(currentUser.id, { 'energy-': 5 });
+      
+      // Optimistic update
+      setCurrentUser(prev => prev ? { ...prev, energy: prev.energy - 5 } : null);
+
+      // Securely pick a winner
+      const winnerIndex = Math.floor(Math.random() * options.length);
+      const winner = options[winnerIndex];
+      
+      setWinnerForAnimation(winner); // Trigger animation
+
+      // Update quest progress for spinning
+      handleUpdateQuestProgress(QuestType.SPIN_ROULETTE);
+
+    } catch (error) {
+      console.error("Failed to start spin:", error);
+      alert(`Не удалось запустить рулетку: ${getPocketbaseError(error)}`);
+      setIsSpinning(false); 
+    }
   }, [currentUser, options, isSpinning, isProcessingWin, handleUpdateQuestProgress]);
-  
-  const handleSpinEnd = useCallback(async (winnerOption: Option) => { /* ... no changes ... */ }, [currentUser]);
   
   const handleAnimationComplete = useCallback(async (winnerOption: Option) => {
     if (!currentUser) return;
     setIsProcessingWin(true);
     try {
-        // ... (existing logic for awarding points/energy)
+        const authorId = winnerOption.author;
+        
+        const winPayload = {
+            option_text: winnerOption.text,
+            option_category: winnerOption.category,
+            author: authorId,
+            timestamp: Date.now(),
+        };
+        
+        const pointReward = 25;
+        const energyReward = 5;
+
+        await Promise.all([
+            pb.collection('users').update(authorId, { 
+                'stats_wins+': 1, 
+                'points+': pointReward, 
+                'energy+': energyReward 
+            }),
+            pb.collection('history').create(winPayload),
+            pb.collection('users').update(currentUser.id, { 'points+': 5 })
+        ]);
+
         if (winnerOption.author === currentUser.id) {
            handleUpdateQuestProgress(QuestType.WIN_ROULETTE);
         }
     } catch (error) {
-        // ... (existing error handling)
+        console.error("Failed to process win:", error);
+        alert(`Ошибка при обработке выигрыша: ${getPocketbaseError(error)}`);
     } finally {
         setIsProcessingWin(false);
+        setIsSpinning(false);
+        setWinnerForAnimation(null);
     }
-  }, [currentUser, handleSpinEnd, handleUpdateQuestProgress]);
+  }, [currentUser, handleUpdateQuestProgress]);
   
   const handleBuyReward = useCallback(async (reward: Reward) => { /* ... no changes ... */ }, [currentUser]);
   
@@ -646,10 +689,66 @@ const App: React.FC = () => {
   }, [currentUser, handleUpdateQuestProgress]);
 
   // Duel Handlers
-  const handleInitiateDuel = useCallback(async (opponent: User) => { /* ... no changes ... */ }, [currentUser]);
-  const handleAcceptDuel = useCallback(async (duel: Duel) => { /* ... no changes ... */ }, [currentUser]);
-  const handleDeclineDuel = useCallback(async (duelId: string) => { /* ... no changes ... */ }, []);
-  const handleCancelDuel = useCallback(async () => { /* ... no changes ... */ }, [activeDuel]);
+  const handleInitiateDuel = useCallback(async (opponent: User) => {
+    if (!currentUser || currentUser.points < DUEL_COST || opponent.points < DUEL_COST) {
+      alert("Недостаточно баллов для дуэли.");
+      return;
+    }
+    if (!confirm(`Вызвать @${opponent.username} на дуэль? Ставка: ${DUEL_COST} 🪙`)) return;
+
+    try {
+      const newDuel = await pb.collection('duels').create<Duel>({
+        challenger: currentUser.id,
+        opponent: opponent.id,
+        stake: DUEL_COST,
+        status: DuelStatus.PENDING,
+      }, { requestKey: null, expand: 'challenger,opponent' });
+      setActiveDuel(newDuel);
+      setView(AppView.DUEL);
+    } catch (error) {
+      console.error("Failed to initiate duel:", error);
+      alert(`Не удалось начать дуэль: ${getPocketbaseError(error)}`);
+    }
+  }, [currentUser]);
+
+  const handleAcceptDuel = useCallback(async (duel: Duel) => {
+    if (!currentUser || currentUser.points < DUEL_COST) {
+      alert("Недостаточно баллов для принятия вызова!");
+      await pb.collection('duels').update(duel.id, { status: DuelStatus.DECLINED }).catch();
+      return;
+    }
+    try {
+      const updatedDuel = await pb.collection('duels').update<Duel>(duel.id, {
+        status: DuelStatus.ACCEPTED,
+      }, { requestKey: null, expand: 'challenger,opponent' });
+      setActiveDuel(updatedDuel);
+      setView(AppView.DUEL);
+    } catch(error) {
+      console.error("Failed to accept duel:", error);
+      alert(`Не удалось принять вызов: ${getPocketbaseError(error)}`);
+    }
+  }, [currentUser]);
+
+  const handleDeclineDuel = useCallback(async (duelId: string) => {
+    try {
+      await pb.collection('duels').update(duelId, { status: DuelStatus.DECLINED });
+    } catch(error) {
+      console.error("Failed to decline duel:", error);
+    }
+  }, []);
+
+  const handleCancelDuel = useCallback(async () => {
+    if (!activeDuel) return;
+    try {
+        await pb.collection('duels').update(activeDuel.id, { status: DuelStatus.CANCELLED });
+        setActiveDuel(null);
+        setView(AppView.GAMES_VIEW);
+    } catch(error) {
+        console.error("Failed to cancel duel:", error);
+        alert(`Не удалось отменить дуэль: ${getPocketbaseError(error)}`);
+    }
+  }, [activeDuel]);
+
 // FIX: The function body was implemented to correctly handle duel logic, define `updatedStatus` and `winnerId` before use, and manage point transfers and quest updates. This resolves the "Cannot find name" errors.
   const handleMakeDuelChoice = useCallback(async (choice: DuelChoice) => {
     if (!activeDuel || !currentUser) return;
@@ -998,8 +1097,28 @@ const App: React.FC = () => {
   }, [currentUser]);
 
 
-  if (isLoading) { /* ... no changes ... */ }
-  if (!currentUser) { /* ... no changes ... */ }
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-tg-bg flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-tg-button border-t-transparent rounded-full animate-spin-slow mx-auto"></div>
+          <p className="mt-4 text-tg-hint">Загрузка...</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-tg-bg flex items-center justify-center p-4">
+        <div className="bg-red-900/50 border border-red-700 text-red-200 p-6 rounded-xl max-w-sm w-full text-center">
+          <p className="text-5xl mb-4">😵</p>
+          <h2 className="text-xl font-bold mb-2">Ошибка инициализации</h2>
+          <p className="text-sm">{initError || "Не удалось загрузить данные пользователя."}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-tg-bg font-sans p-4">
